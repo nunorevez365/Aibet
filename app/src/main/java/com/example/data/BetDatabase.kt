@@ -17,6 +17,7 @@ import com.example.quant.BetStatus
 import com.example.quant.GeneratedSlip
 import com.example.quant.RoiSummary
 import com.example.quant.StakeMode
+import com.example.quant.TennisSlip
 import kotlinx.coroutines.flow.Flow
 import java.util.Locale
 
@@ -148,6 +149,14 @@ class BetHistoryRepository(private val dao: BetSlipDao) {
         dao.insertSlips(slips.map { it.toEntity(cycleLabel) })
     }
 
+    suspend fun saveTennisSlip(slip: TennisSlip, cycleLabel: String): Long {
+        return dao.insertSlip(slip.toEntity(cycleLabel))
+    }
+
+    suspend fun saveTennisSlips(slips: List<TennisSlip>, cycleLabel: String) {
+        dao.insertSlips(slips.map { it.toEntity(cycleLabel) })
+    }
+
     suspend fun updateOutcome(slip: BetSlipEntity, newStatus: BetStatus) {
         val computedNetProfit = when (newStatus) {
             BetStatus.PENDING -> 0.0
@@ -249,6 +258,32 @@ private fun BasketballSlip.toEntity(cycleLabel: String): BetSlipEntity {
     return BetSlipEntity(
         cycleLabel = "🏀 $cycleLabel",
         slipCategory = "BASKET_${type.code}",
+        title = title,
+        selectionsSummary = summary,
+        combinedOdd = combinedOdd,
+        stake = stake,
+        isFreebet = stakeMode == StakeMode.FREEBET,
+        expectedValue = expectedValue,
+        trueProbability = combinedTrueProb
+    )
+}
+
+private fun TennisSlip.toEntity(cycleLabel: String): BetSlipEntity {
+    val summary = selections.joinToString("\n") { leg ->
+        val edgeSign = if (leg.edge >= 0) "+" else ""
+        String.format(
+            Locale.US,
+            "%s • %s @ %.2f (Edge %s%.1f%%)",
+            leg.matchLabel,
+            leg.lineLabel,
+            leg.odd,
+            edgeSign,
+            leg.edge * 100.0
+        )
+    }
+    return BetSlipEntity(
+        cycleLabel = "🎾 $cycleLabel",
+        slipCategory = "TENNIS_${type.code}",
         title = title,
         selectionsSummary = summary,
         combinedOdd = combinedOdd,

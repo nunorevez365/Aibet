@@ -10,14 +10,15 @@ import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.round
 
 private const val TAG = "BasketballRepository"
 private const val MODEL_NAME = "gemini-3.5-flash-lite"
-private const val ENRICH_TIMEOUT_MS = 30_000L
+private const val ENRICH_TIMEOUT_MS = 10_000L
 
 /**
  * Hybrid Real-Time Basketball Data Pipeline:
@@ -96,8 +97,17 @@ class BasketballRepository(
         """.trimIndent()
 
         return try {
-            val response = withTimeout(ENRICH_TIMEOUT_MS) {
+            val response = withTimeoutOrNull(ENRICH_TIMEOUT_MS) {
                 enrichmentModel.generateContent(prompt)
+            }
+            if (response == null) {
+                Log.w(TAG, "Gemini basketball enrichment timed out after ${ENRICH_TIMEOUT_MS}ms; using direct ESPN live data")
+                return buildDirectResult(
+                    cycleInfo,
+                    baseMatches,
+                    sources,
+                    "$windowNote • Modo Direto ESPN ativo (PPG/OPPG, quartos Q1–Q4 e linhas reais)."
+                )
             }
             val jsonStr = response.text?.trim().orEmpty()
             if (jsonStr.isBlank()) {
@@ -149,6 +159,14 @@ class BasketballRepository(
                 sources = sources,
                 searchQueries = listOf("ESPN Basketball Scoreboard", "ESPN PPG/OPPG Standings", "Gemini $MODEL_NAME"),
                 modelSummaryNote = if (summary.isNotBlank()) "$windowNote • $summary" else "$windowNote • Calibrado com Gemini AI."
+            )
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Gemini basketball enrichment timed out (${e.message}); using direct ESPN live data")
+            buildDirectResult(
+                cycleInfo,
+                baseMatches,
+                sources,
+                "$windowNote • Modo Direto ESPN ativo (PPG/OPPG, quartos Q1–Q4 e linhas reais)."
             )
         } catch (e: CancellationException) {
             throw e

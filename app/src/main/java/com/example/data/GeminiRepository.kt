@@ -11,13 +11,14 @@ import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
 private const val TAG = "GeminiRepository"
 private const val MODEL_NAME = "gemini-3.5-flash-lite"
-private const val ENRICH_TIMEOUT_MS = 35_000L
+private const val ENRICH_TIMEOUT_MS = 10_000L
 
 /**
  * Hybrid Real-Time Data Pipeline:
@@ -115,8 +116,17 @@ class GeminiRepository(
         """.trimIndent()
 
         return try {
-            val response = withTimeout(ENRICH_TIMEOUT_MS) {
+            val response = withTimeoutOrNull(ENRICH_TIMEOUT_MS) {
                 enrichmentModel.generateContent(prompt)
+            }
+            if (response == null) {
+                Log.w(TAG, "Gemini football enrichment timed out after ${ENRICH_TIMEOUT_MS}ms; using direct ESPN live telemetry")
+                return buildDirectEspnResult(
+                    cycleInfo,
+                    baseMatches,
+                    sources,
+                    "$windowNote • Modo Direto ESPN ativo — dados oficiais de calendário e classificações carregados em tempo real."
+                )
             }
             val jsonStr = response.text?.trim().orEmpty()
             if (jsonStr.isBlank()) {
@@ -169,6 +179,14 @@ class GeminiRepository(
                 sources = sources,
                 searchQueries = listOf("ESPN Live Scoreboard", "ESPN Season Standings", "Gemini $MODEL_NAME"),
                 modelSummaryNote = if (summary.isNotBlank()) "$windowNote • $summary" else "$windowNote • Calibrado com Gemini AI."
+            )
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "Gemini football enrichment timed out (${e.message}); proceeding with direct ESPN live telemetry")
+            buildDirectEspnResult(
+                cycleInfo,
+                baseMatches,
+                sources,
+                "$windowNote • Modo Direto ESPN ativo — dados oficiais de calendário e classificações carregados em tempo real."
             )
         } catch (e: CancellationException) {
             throw e

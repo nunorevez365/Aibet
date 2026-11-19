@@ -10,6 +10,7 @@ import com.example.data.BetHistoryRepository
 import com.example.data.BetSlipEntity
 import com.example.data.GeminiRepository
 import com.example.data.SavedUserSettings
+import com.example.data.TennisRepository
 import com.example.quant.AnalysisBundle
 import com.example.quant.BasketballAnalysisBundle
 import com.example.quant.BasketballFetchResult
@@ -25,8 +26,13 @@ import com.example.quant.SelectableDay
 import com.example.quant.SportMode
 import com.example.quant.StakeMode
 import com.example.quant.TemporalCycleInfo
+import com.example.quant.TennisAnalysisBundle
+import com.example.quant.TennisFetchResult
+import com.example.quant.TennisQuantEngine
+import com.example.quant.TennisSlip
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -56,6 +62,13 @@ sealed interface BasketballUiState {
     data class Error(val message: String, val canRestoreCached: Boolean = false) : BasketballUiState
 }
 
+sealed interface TennisUiState {
+    data object Idle : TennisUiState
+    data class Analyzing(val stepIndex: Int, val stepLabel: String) : TennisUiState
+    data class Success(val bundle: TennisAnalysisBundle) : TennisUiState
+    data class Error(val message: String, val canRestoreCached: Boolean = false) : TennisUiState
+}
+
 enum class HistoryFilter(val label: String) {
     ALL("Todos"),
     PENDING("Pendentes"),
@@ -77,23 +90,28 @@ data class BetUiState(
     val useFullLeverageSlip3: Boolean = false,
     val selectedMatchIndex: Int = 0,
     val selectedBasketballMatchIndex: Int = 0,
+    val selectedTennisMatchIndex: Int = 0,
     val showFull12x12Matrix: Boolean = false,
     val historyFilter: HistoryFilter = HistoryFilter.ALL,
     val savedSlipKeys: Set<String> = emptySet(),
     val savedBasketballSlipKeys: Set<String> = emptySet(),
+    val savedTennisSlipKeys: Set<String> = emptySet(),
     val analysisState: AnalysisUiState = AnalysisUiState.Idle,
-    val basketballState: BasketballUiState = BasketballUiState.Idle
+    val basketballState: BasketballUiState = BasketballUiState.Idle,
+    val tennisState: TennisUiState = TennisUiState.Idle
 )
 
 class BetViewModel(
     private val geminiRepository: GeminiRepository,
     private val basketballRepository: BasketballRepository = BasketballRepository(),
+    private val tennisRepository: TennisRepository = TennisRepository(),
     private val historyRepository: BetHistoryRepository,
     private val cacheStore: AnalysisCacheStore? = null
 ) : ViewModel() {
 
     private var lastFetchResult: GroundedFetchResult? = null
     private var lastBasketballFetchResult: BasketballFetchResult? = null
+    private var lastTennisFetchResult: TennisFetchResult? = null
 
     private val _uiState = MutableStateFlow(BetUiState())
     val uiState: StateFlow<BetUiState> = _uiState.asStateFlow()
@@ -174,6 +192,22 @@ class BetViewModel(
                 }
                 _uiState.update { it.copy(basketballState = BasketballUiState.Success(restoredBasket)) }
             }
+
+            val cachedTennis = withContext(Dispatchers.IO) {
+                runCatching { store.loadLatestTennisAnalysis() }.getOrNull()
+            }
+            if (cachedTennis != null && cachedTennis.matches.size >= 2) {
+                lastTennisFetchResult = cachedTennis
+                val snapshot = _uiState.value
+                val restoredTennis = withContext(Dispatchers.Default) {
+                    TennisQuantEngine.buildAnalysisBundle(
+                        fetchResult = cachedTennis,
+                        stakeMode = snapshot.stakeMode,
+                        totalBudget = snapshot.budgetAmount
+                    )
+                }
+                _uiState.update { it.copy(tennisState = TennisUiState.Success(restoredTennis)) }
+            }
         }
     }
 
@@ -251,7 +285,8 @@ class BetViewModel(
                 budgetAmount = nextBudget,
                 budgetInput = String.format(java.util.Locale.US, "%.2f", nextBudget),
                 savedSlipKeys = emptySet(),
-                savedBasketballSlipKeys = emptySet()
+                savedBasketballSlipKeys = emptySet(),
+                savedTennisSlipKeys = emptySet()
             )
         }
         persistCurrentSettings()
@@ -266,7 +301,8 @@ class BetViewModel(
                 budgetInput = raw,
                 budgetAmount = parsed?.coerceIn(1.0, 50_000.0) ?: it.budgetAmount,
                 savedSlipKeys = emptySet(),
-                savedBasketballSlipKeys = emptySet()
+                savedBasketballSlipKeys = emptySet(),
+                savedTennisSlipKeys = emptySet()
             )
         }
         if (parsed != null && parsed >= 1.0) {
@@ -281,7 +317,8 @@ class BetViewModel(
                 budgetAmount = amount,
                 budgetInput = String.format(java.util.Locale.US, "%.2f", amount),
                 savedSlipKeys = emptySet(),
-                savedBasketballSlipKeys = emptySet()
+                savedBasketballSlipKeys = emptySet(),
+                savedTennisSlipKeys = emptySet()
             )
         }
         persistCurrentSettings()
@@ -301,6 +338,10 @@ class BetViewModel(
         _uiState.update { it.copy(selectedBasketballMatchIndex = index.coerceAtLeast(0)) }
     }
 
+    fun selectTennisMatchIndex(index: Int) {
+        _uiState.update { it.copy(selectedTennisMatchIndex = index.coerceAtLeast(0)) }
+    }
+
     fun toggleFull12x12Matrix() {
         _uiState.update { it.copy(showFull12x12Matrix = !it.showFull12x12Matrix) }
     }
@@ -310,35 +351,46 @@ class BetViewModel(
     }
 
     fun restoreLastCachedAnalysis() {
-        if (_uiState.value.sportMode == SportMode.BASKETBALL) {
-            val cached = lastBasketballFetchResult ?: return
-            val snapshot = _uiState.value
-            viewModelScope.launch {
-                val bundle = withContext(Dispatchers.Default) {
-                    BasketballQuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
-                }
-                _uiState.update { it.copy(basketballState = BasketballUiState.Success(bundle)) }
-                _snackbarMessages.tryEmit("Última análise de Basquetebol restaurada.")
-            }
-            return
-        }
-
-        val cached = lastFetchResult ?: return
         val snapshot = _uiState.value
-        viewModelScope.launch {
-            val bundle = withContext(Dispatchers.Default) {
-                QuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
+        when (snapshot.sportMode) {
+            SportMode.BASKETBALL -> {
+                val cached = lastBasketballFetchResult ?: return
+                viewModelScope.launch {
+                    val bundle = withContext(Dispatchers.Default) {
+                        BasketballQuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
+                    }
+                    _uiState.update { it.copy(basketballState = BasketballUiState.Success(bundle)) }
+                    _snackbarMessages.tryEmit("Última análise de Basquetebol restaurada.")
+                }
             }
-            _uiState.update { it.copy(analysisState = AnalysisUiState.Success(bundle)) }
-            _snackbarMessages.tryEmit("Última análise de Futebol restaurada.")
+            SportMode.TENNIS -> {
+                val cached = lastTennisFetchResult ?: return
+                viewModelScope.launch {
+                    val bundle = withContext(Dispatchers.Default) {
+                        TennisQuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
+                    }
+                    _uiState.update { it.copy(tennisState = TennisUiState.Success(bundle)) }
+                    _snackbarMessages.tryEmit("Última análise de Ténis restaurada.")
+                }
+            }
+            SportMode.FOOTBALL -> {
+                val cached = lastFetchResult ?: return
+                viewModelScope.launch {
+                    val bundle = withContext(Dispatchers.Default) {
+                        QuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
+                    }
+                    _uiState.update { it.copy(analysisState = AnalysisUiState.Success(bundle)) }
+                    _snackbarMessages.tryEmit("Última análise de Futebol restaurada.")
+                }
+            }
         }
     }
 
     fun analyzeAndGenerateSlips() {
-        if (_uiState.value.sportMode == SportMode.BASKETBALL) {
-            analyzeBasketballPipeline()
-        } else {
-            analyzeFootballPipeline()
+        when (_uiState.value.sportMode) {
+            SportMode.FOOTBALL -> analyzeFootballPipeline()
+            SportMode.BASKETBALL -> analyzeBasketballPipeline()
+            SportMode.TENNIS -> analyzeTennisPipeline()
         }
     }
 
@@ -422,6 +474,16 @@ class BetViewModel(
                         cycleInfo = fetched.cycleInfo,
                         selectedMatchIndex = 0,
                         analysisState = AnalysisUiState.Success(bundle)
+                    )
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Football pipeline timed out", e)
+                _uiState.update {
+                    it.copy(
+                        analysisState = AnalysisUiState.Error(
+                            message = "Tempo limite excedido ao obter dados de Futebol. Tenta novamente.",
+                            canRestoreCached = lastFetchResult != null
+                        )
                     )
                 }
             } catch (e: CancellationException) {
@@ -522,6 +584,16 @@ class BetViewModel(
                         basketballState = BasketballUiState.Success(bundle)
                     )
                 }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Basketball pipeline timed out", e)
+                _uiState.update {
+                    it.copy(
+                        basketballState = BasketballUiState.Error(
+                            message = "Tempo limite excedido ao obter dados de Basquetebol. Tenta novamente.",
+                            canRestoreCached = lastBasketballFetchResult != null
+                        )
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -538,10 +610,119 @@ class BetViewModel(
         }
     }
 
+    private fun analyzeTennisPipeline() {
+        if (_uiState.value.tennisState is TennisUiState.Analyzing) return
+
+        viewModelScope.launch {
+            try {
+                val selectedDates = _uiState.value.selectedDatesIso
+                val cycleInfo = QuantEngine.buildCycleInfoForDates(selectedDates)
+                _uiState.update {
+                    it.copy(
+                        cycleInfo = cycleInfo,
+                        savedTennisSlipKeys = emptySet(),
+                        tennisState = TennisUiState.Analyzing(
+                            stepIndex = 1,
+                            stepLabel = "Passo 1/4 • Ténis ATP/WTA: ${cycleInfo.startDateIso} a ${cycleInfo.endDateIso} (${cycleInfo.timezoneLabel})…"
+                        )
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        tennisState = TennisUiState.Analyzing(
+                            stepIndex = 2,
+                            stepLabel = "Passo 2/4 • A consultar encontros oficiais ATP/WTA, rankings e superfícies…"
+                        )
+                    )
+                }
+                val fetched = withContext(Dispatchers.IO) {
+                    tennisRepository.fetchTennisMatches(
+                        cycleInfo = cycleInfo,
+                        onStageUpdate = { stageMsg ->
+                            _uiState.update { state ->
+                                state.copy(
+                                    tennisState = TennisUiState.Analyzing(
+                                        stepIndex = 2,
+                                        stepLabel = stageMsg
+                                    )
+                                )
+                            }
+                        }
+                    )
+                }
+                lastTennisFetchResult = fetched
+
+                cacheStore?.let { store ->
+                    withContext(Dispatchers.IO) {
+                        runCatching { store.saveLatestTennisAnalysis(fetched) }
+                    }
+                }
+
+                _uiState.update {
+                    it.copy(
+                        tennisState = TennisUiState.Analyzing(
+                            stepIndex = 3,
+                            stepLabel = "Passo 3/4 • A calcular Markov de serviço, sets exatos e total de jogos para ${fetched.matches.size} encontros…"
+                        )
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        tennisState = TennisUiState.Analyzing(
+                            stepIndex = 4,
+                            stepLabel = "Passo 4/4 • A simular 100.000 cenários set-a-set em Monte Carlo…"
+                        )
+                    )
+                }
+                val stateSnapshot = _uiState.value
+                val bundle = withContext(Dispatchers.Default) {
+                    TennisQuantEngine.buildAnalysisBundle(
+                        fetchResult = fetched,
+                        stakeMode = stateSnapshot.stakeMode,
+                        totalBudget = stateSnapshot.budgetAmount
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        cycleInfo = fetched.cycleInfo,
+                        selectedTennisMatchIndex = 0,
+                        tennisState = TennisUiState.Success(bundle)
+                    )
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Tennis pipeline timed out", e)
+                _uiState.update {
+                    it.copy(
+                        tennisState = TennisUiState.Error(
+                            message = "Tempo limite excedido ao obter dados de Ténis. Tenta novamente.",
+                            canRestoreCached = lastTennisFetchResult != null
+                        )
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Tennis pipeline failed", e)
+                _uiState.update {
+                    it.copy(
+                        tennisState = TennisUiState.Error(
+                            message = e.message ?: "Erro ao executar o pipeline de Ténis.",
+                            canRestoreCached = lastTennisFetchResult != null
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     private fun recalculateLocallyIfReady() {
         val snapshot = _uiState.value
         val fetchedFootball = lastFetchResult
         val fetchedBasket = lastBasketballFetchResult
+        val fetchedTennis = lastTennisFetchResult
 
         viewModelScope.launch {
             if (fetchedFootball != null) {
@@ -555,6 +736,12 @@ class BetViewModel(
                     BasketballQuantEngine.buildAnalysisBundle(fetchedBasket, snapshot.stakeMode, snapshot.budgetAmount)
                 }
                 _uiState.update { it.copy(basketballState = BasketballUiState.Success(recomputedBk)) }
+            }
+            if (fetchedTennis != null) {
+                val recomputedTn = withContext(Dispatchers.Default) {
+                    TennisQuantEngine.buildAnalysisBundle(fetchedTennis, snapshot.stakeMode, snapshot.budgetAmount)
+                }
+                _uiState.update { it.copy(tennisState = TennisUiState.Success(recomputedTn)) }
             }
         }
     }
@@ -651,6 +838,58 @@ class BetViewModel(
         _snackbarMessages.tryEmit("Linhas e odds Betclic Basquetebol guardadas e recalculadas.")
     }
 
+    fun updateTennisLinesAndOdds(
+        matchId: String,
+        totalGamesLine: Double,
+        p1GameHcLine: Double,
+        oddP1Ml: Double,
+        oddP2Ml: Double,
+        oddP1Set1: Double,
+        oddP2Set1: Double,
+        oddGamesOver: Double,
+        oddGamesUnder: Double,
+        oddP1Hc: Double,
+        oddP2Hc: Double,
+        oddStraight: Double,
+        oddOverSets: Double,
+        oddTiebreak: Double
+    ) {
+        val current = lastTennisFetchResult ?: return
+        val updatedMatches = current.matches.map { m ->
+            if (m.id == matchId) {
+                m.copy(
+                    totalGamesLine = totalGamesLine.coerceIn(14.5, 52.5),
+                    p1GameHandicapLine = p1GameHcLine.coerceIn(-14.5, 14.5),
+                    oddP1Ml = oddP1Ml.coerceAtLeast(1.02),
+                    oddP2Ml = oddP2Ml.coerceAtLeast(1.02),
+                    oddP1Set1 = oddP1Set1.coerceAtLeast(1.02),
+                    oddP2Set1 = oddP2Set1.coerceAtLeast(1.02),
+                    oddGamesOver = oddGamesOver.coerceAtLeast(1.02),
+                    oddGamesUnder = oddGamesUnder.coerceAtLeast(1.02),
+                    oddP1GameHc = oddP1Hc.coerceAtLeast(1.02),
+                    oddP2GameHc = oddP2Hc.coerceAtLeast(1.02),
+                    oddP1StraightSets = oddStraight.coerceAtLeast(1.02),
+                    oddOverSets = oddOverSets.coerceAtLeast(1.02),
+                    oddTiebreakYes = oddTiebreak.coerceAtLeast(1.02)
+                )
+            } else {
+                m
+            }
+        }
+        val updatedFetch = current.copy(matches = updatedMatches)
+        lastTennisFetchResult = updatedFetch
+        _uiState.update { it.copy(savedTennisSlipKeys = emptySet()) }
+
+        cacheStore?.let { store ->
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { store.saveLatestTennisAnalysis(updatedFetch) }
+            }
+        }
+
+        recalculateLocallyIfReady()
+        _snackbarMessages.tryEmit("Linhas e odds Betclic Ténis guardadas e recalculadas.")
+    }
+
     fun saveSlipToHistory(slip: GeneratedSlip) {
         val cycleLabel = "${_uiState.value.cycleInfo.cycle.code} • ${_uiState.value.cycleInfo.startDateIso}"
         val key = "${slip.type.code}_${slip.isFullLeverageVariant}"
@@ -701,6 +940,31 @@ class BetViewModel(
         }
     }
 
+    fun saveTennisSlipToHistory(slip: TennisSlip) {
+        val cycleLabel = "TÉNIS • ${_uiState.value.cycleInfo.startDateIso}"
+        val key = "${slip.type.code}_${slip.isFullLeverageVariant}"
+        viewModelScope.launch {
+            historyRepository.saveTennisSlip(slip, cycleLabel)
+            _uiState.update { it.copy(savedTennisSlipKeys = it.savedTennisSlipKeys + key) }
+            _snackbarMessages.tryEmit("${slip.title} guardado no histórico Room.")
+        }
+    }
+
+    fun saveAllActiveTennisSlips() {
+        val success = _uiState.value.tennisState as? TennisUiState.Success ?: return
+        val bundle = success.bundle
+        val activeSlip3 = if (_uiState.value.useFullLeverageSlip3) bundle.slip3Full else bundle.slip3Base
+        val slips = listOf(bundle.slip1, bundle.slip2, activeSlip3)
+        val cycleLabel = "TÉNIS • ${bundle.cycleInfo.startDateIso}"
+        val keys = slips.map { "${it.type.code}_${it.isFullLeverageVariant}" }.toSet()
+
+        viewModelScope.launch {
+            historyRepository.saveTennisSlips(slips, cycleLabel)
+            _uiState.update { it.copy(savedTennisSlipKeys = it.savedTennisSlipKeys + keys) }
+            _snackbarMessages.tryEmit("Os 3 boletins de Ténis foram registados no histórico.")
+        }
+    }
+
     fun markSlipOutcome(slip: BetSlipEntity, status: BetStatus) {
         viewModelScope.launch {
             historyRepository.updateOutcome(slip, status)
@@ -718,12 +982,19 @@ class BetViewModel(
     class Factory(
         private val geminiRepository: GeminiRepository,
         private val basketballRepository: BasketballRepository = BasketballRepository(),
+        private val tennisRepository: TennisRepository = TennisRepository(),
         private val historyRepository: BetHistoryRepository,
         private val cacheStore: AnalysisCacheStore? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return BetViewModel(geminiRepository, basketballRepository, historyRepository, cacheStore) as T
+            return BetViewModel(
+                geminiRepository = geminiRepository,
+                basketballRepository = basketballRepository,
+                tennisRepository = tennisRepository,
+                historyRepository = historyRepository,
+                cacheStore = cacheStore
+            ) as T
         }
     }
 }

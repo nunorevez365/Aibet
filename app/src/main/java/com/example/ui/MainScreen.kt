@@ -246,12 +246,18 @@ fun MainScreen(viewModel: BetViewModel) {
                                     onSaveAllSlips = viewModel::saveAllActiveSlips,
                                     onSaveBasketballSlip = viewModel::saveBasketballSlipToHistory,
                                     onSaveAllBasketballSlips = viewModel::saveAllActiveBasketballSlips,
+                                    onSaveTennisSlip = viewModel::saveTennisSlipToHistory,
+                                    onSaveAllTennisSlips = viewModel::saveAllActiveTennisSlips,
                                     onOpenMatrixForMatch = { matchIdx ->
                                         viewModel.selectMatchIndex(matchIdx)
                                         selectedTab = 1
                                     },
                                     onOpenMatrixForBasketballMatch = { matchIdx ->
                                         viewModel.selectBasketballMatchIndex(matchIdx)
+                                        selectedTab = 1
+                                    },
+                                    onOpenMatrixForTennisMatch = { matchIdx ->
+                                        viewModel.selectTennisMatchIndex(matchIdx)
                                         selectedTab = 1
                                     }
                                 )
@@ -260,9 +266,11 @@ fun MainScreen(viewModel: BetViewModel) {
                                     onSelectSport = viewModel::setSportMode,
                                     onSelectMatch = viewModel::selectMatchIndex,
                                     onSelectBasketballMatch = viewModel::selectBasketballMatchIndex,
+                                    onSelectTennisMatch = viewModel::selectTennisMatchIndex,
                                     onToggleFullMatrix = viewModel::toggleFull12x12Matrix,
                                     onUpdateMatchOdds = viewModel::updateMatchOdds,
                                     onUpdateBasketballOdds = viewModel::updateBasketballLinesAndOdds,
+                                    onUpdateTennisOdds = viewModel::updateTennisLinesAndOdds,
                                     onNavigateToAnalyze = { selectedTab = 0 }
                                 )
                                 else -> HistoryRoiTab(

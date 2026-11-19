@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsBasketball
 import androidx.compose.material.icons.filled.SportsSoccer
+import androidx.compose.material.icons.filled.SportsTennis
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -88,15 +89,15 @@ fun SportModeSelectorRow(
     ) {
         SportMode.entries.forEach { mode ->
             val selected = sportMode == mode
-            val accent = if (mode == SportMode.BASKETBALL) {
-                MaterialTheme.colorScheme.tertiary
-            } else {
-                MaterialTheme.colorScheme.primary
+            val accent = when (mode) {
+                SportMode.FOOTBALL -> MaterialTheme.colorScheme.primary
+                SportMode.BASKETBALL -> MaterialTheme.colorScheme.tertiary
+                SportMode.TENNIS -> MaterialTheme.colorScheme.secondary
             }
-            val container = if (mode == SportMode.BASKETBALL) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.primaryContainer
+            val container = when (mode) {
+                SportMode.FOOTBALL -> MaterialTheme.colorScheme.primaryContainer
+                SportMode.BASKETBALL -> MaterialTheme.colorScheme.tertiaryContainer
+                SportMode.TENNIS -> MaterialTheme.colorScheme.secondaryContainer
             }
 
             Surface(
@@ -113,24 +114,24 @@ fun SportModeSelectorRow(
                 )
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = if (mode == SportMode.BASKETBALL) {
-                            Icons.Filled.SportsBasketball
-                        } else {
-                            Icons.Filled.SportsSoccer
+                        imageVector = when (mode) {
+                            SportMode.FOOTBALL -> Icons.Filled.SportsSoccer
+                            SportMode.BASKETBALL -> Icons.Filled.SportsBasketball
+                            SportMode.TENNIS -> Icons.Filled.SportsTennis
                         },
                         contentDescription = null,
                         tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = mode.label,
-                        style = MaterialTheme.typography.titleSmall,
+                        text = mode.shortLabel,
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

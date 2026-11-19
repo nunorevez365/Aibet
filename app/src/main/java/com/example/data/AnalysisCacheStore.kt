@@ -8,10 +8,13 @@ import com.example.quant.GroundingSource
 import com.example.quant.QuantEngine
 import com.example.quant.RawBasketballMatchData
 import com.example.quant.RawMatchData
+import com.example.quant.RawTennisMatchData
 import com.example.quant.SportMode
 import com.example.quant.StakeMode
 import com.example.quant.TemporalCycle
 import com.example.quant.TemporalCycleInfo
+import com.example.quant.TennisFetchResult
+import com.example.quant.TennisSurface
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -119,9 +122,29 @@ class AnalysisCacheStore(
         return runCatching { deserializeBasketballFetchResult(entity.payloadJson) }.getOrNull()
     }
 
+    suspend fun saveLatestTennisAnalysis(result: TennisFetchResult) {
+        val json = serializeTennisFetchResult(result)
+        val entity = CachedAnalysisEntity(
+            id = SLOT_TENNIS,
+            updatedAtMillis = System.currentTimeMillis(),
+            cycleCode = result.cycleInfo.cycle.code,
+            startDateIso = result.cycleInfo.startDateIso,
+            endDateIso = result.cycleInfo.endDateIso,
+            exactDatesCsv = result.cycleInfo.exactDatesIso.joinToString(","),
+            payloadJson = json
+        )
+        cachedAnalysisDao.upsert(entity)
+    }
+
+    suspend fun loadLatestTennisAnalysis(): TennisFetchResult? {
+        val entity = cachedAnalysisDao.getBySlot(SLOT_TENNIS) ?: return null
+        return runCatching { deserializeTennisFetchResult(entity.payloadJson) }.getOrNull()
+    }
+
     companion object {
         private const val SLOT_FOOTBALL = 1
         private const val SLOT_BASKETBALL = 2
+        private const val SLOT_TENNIS = 3
 
         private const val PREFS_NAME = "betquant_prefs"
         private const val KEY_SPORT_MODE = "sport_mode"
@@ -404,6 +427,143 @@ class AnalysisCacheStore(
                 sources = sources,
                 searchQueries = queries,
                 modelSummaryNote = root.optString("modelSummaryNote", "Análise Basquetebol guardada localmente.")
+            )
+        }
+
+        internal fun serializeTennisFetchResult(result: TennisFetchResult): String {
+            val root = JSONObject()
+            root.put("cycleInfo", encodeCycleInfo(result.cycleInfo))
+            root.put("modelSummaryNote", result.modelSummaryNote)
+            root.put("searchQueries", JSONArray(result.searchQueries))
+
+            val sourcesArr = JSONArray()
+            result.sources.forEach { src ->
+                sourcesArr.put(JSONObject().apply { put("title", src.title); put("uri", src.uri) })
+            }
+            root.put("sources", sourcesArr)
+
+            val matchesArr = JSONArray()
+            result.matches.forEach { m ->
+                matchesArr.put(
+                    JSONObject().apply {
+                        put("id", m.id)
+                        put("dataHoraWet", m.dataHoraWet)
+                        put("torneio", m.torneio)
+                        put("ronda", m.ronda)
+                        put("circuito", m.circuito)
+                        put("superficie", m.superficie.name)
+                        put("bestOfSets", m.bestOfSets)
+                        put("jogador1", m.jogador1)
+                        put("jogador2", m.jogador2)
+                        put("ranking1", m.ranking1 ?: -1)
+                        put("ranking2", m.ranking2 ?: -1)
+                        put("serveHoldProb1", m.serveHoldProb1)
+                        put("serveHoldProb2", m.serveHoldProb2)
+                        put("surfaceNotes", m.surfaceNotes)
+                        put("totalGamesLine", m.totalGamesLine)
+                        put("p1GameHandicapLine", m.p1GameHandicapLine)
+                        put("oddP1Ml", m.oddP1Ml)
+                        put("oddP2Ml", m.oddP2Ml)
+                        put("oddP1Set1", m.oddP1Set1)
+                        put("oddP2Set1", m.oddP2Set1)
+                        put("oddGamesOver", m.oddGamesOver)
+                        put("oddGamesUnder", m.oddGamesUnder)
+                        put("oddP1GameHc", m.oddP1GameHc)
+                        put("oddP2GameHc", m.oddP2GameHc)
+                        put("oddP1StraightSets", m.oddP1StraightSets)
+                        put("oddOverSets", m.oddOverSets)
+                        put("oddTiebreakYes", m.oddTiebreakYes)
+                        put("fontesVerificadas", JSONArray(m.fontesVerificadas))
+                    }
+                )
+            }
+            root.put("matches", matchesArr)
+            return root.toString()
+        }
+
+        internal fun deserializeTennisFetchResult(jsonString: String): TennisFetchResult? {
+            val root = JSONObject(jsonString)
+            val cycleObj = root.optJSONObject("cycleInfo") ?: return null
+            val cycleInfo = decodeCycleInfo(cycleObj)
+
+            val sources = mutableListOf<GroundingSource>()
+            val sourcesArr = root.optJSONArray("sources")
+            if (sourcesArr != null) {
+                for (i in 0 until sourcesArr.length()) {
+                    val s = sourcesArr.optJSONObject(i) ?: continue
+                    sources.add(GroundingSource(s.optString("title", ""), s.optString("uri", "")))
+                }
+            }
+
+            val queries = mutableListOf<String>()
+            val queriesArr = root.optJSONArray("searchQueries")
+            if (queriesArr != null) {
+                for (i in 0 until queriesArr.length()) {
+                    val q = queriesArr.optString(i, "")
+                    if (q.isNotBlank()) queries.add(q)
+                }
+            }
+
+            val matches = mutableListOf<RawTennisMatchData>()
+            val matchesArr = root.optJSONArray("matches") ?: return null
+            for (i in 0 until matchesArr.length()) {
+                val m = matchesArr.optJSONObject(i) ?: continue
+                val verified = mutableListOf<String>()
+                val vArr = m.optJSONArray("fontesVerificadas")
+                if (vArr != null) {
+                    for (j in 0 until vArr.length()) {
+                        val v = vArr.optString(j, "")
+                        if (v.isNotBlank()) verified.add(v)
+                    }
+                }
+                val r1 = m.optInt("ranking1", -1).takeIf { it > 0 }
+                val r2 = m.optInt("ranking2", -1).takeIf { it > 0 }
+                val surf = runCatching {
+                    TennisSurface.valueOf(m.optString("superficie", TennisSurface.HARD.name))
+                }.getOrDefault(TennisSurface.HARD)
+
+                matches.add(
+                    RawTennisMatchData(
+                        id = m.optString("id", "tn_cached_$i"),
+                        dataHoraWet = m.optString("dataHoraWet", ""),
+                        torneio = m.optString("torneio", "ATP Tour"),
+                        ronda = m.optString("ronda", "Ronda Oficial"),
+                        circuito = m.optString("circuito", "ATP"),
+                        superficie = surf,
+                        bestOfSets = m.optInt("bestOfSets", 3),
+                        jogador1 = m.optString("jogador1", ""),
+                        jogador2 = m.optString("jogador2", ""),
+                        ranking1 = r1,
+                        ranking2 = r2,
+                        serveHoldProb1 = m.optDouble("serveHoldProb1", 0.79),
+                        serveHoldProb2 = m.optDouble("serveHoldProb2", 0.77),
+                        surfaceNotes = m.optString("surfaceNotes", ""),
+                        totalGamesLine = m.optDouble("totalGamesLine", 22.5),
+                        p1GameHandicapLine = m.optDouble("p1GameHandicapLine", -2.5),
+                        oddP1Ml = m.optDouble("oddP1Ml", 1.70),
+                        oddP2Ml = m.optDouble("oddP2Ml", 2.15),
+                        oddP1Set1 = m.optDouble("oddP1Set1", 1.75),
+                        oddP2Set1 = m.optDouble("oddP2Set1", 2.05),
+                        oddGamesOver = m.optDouble("oddGamesOver", 1.87),
+                        oddGamesUnder = m.optDouble("oddGamesUnder", 1.87),
+                        oddP1GameHc = m.optDouble("oddP1GameHc", 1.87),
+                        oddP2GameHc = m.optDouble("oddP2GameHc", 1.87),
+                        oddP1StraightSets = m.optDouble("oddP1StraightSets", 2.50),
+                        oddOverSets = m.optDouble("oddOverSets", 2.20),
+                        oddTiebreakYes = m.optDouble("oddTiebreakYes", 2.10),
+                        fontesVerificadas = verified
+                    )
+                )
+            }
+
+            if (matches.size < 2) return null
+
+            return TennisFetchResult(
+                cycleInfo = cycleInfo,
+                matches = matches,
+                sources = sources,
+                searchQueries = queries,
+                modelSummaryNote = root.optString("modelSummaryNote", "Análise Ténis guardada localmente.")
             )
         }
     }

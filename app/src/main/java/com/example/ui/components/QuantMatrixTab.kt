@@ -77,9 +77,11 @@ fun QuantMatrixTab(
     onSelectSport: (SportMode) -> Unit,
     onSelectMatch: (Int) -> Unit,
     onSelectBasketballMatch: (Int) -> Unit,
+    onSelectTennisMatch: (Int) -> Unit,
     onToggleFullMatrix: () -> Unit,
     onUpdateMatchOdds: (String, Double, Double, Double, Double, Double, Double) -> Unit,
     onUpdateBasketballOdds: (String, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double) -> Unit,
+    onUpdateTennisOdds: (String, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double) -> Unit,
     onNavigateToAnalyze: () -> Unit
 ) {
     if (uiState.sportMode == SportMode.BASKETBALL) {
@@ -88,6 +90,16 @@ fun QuantMatrixTab(
             onSelectSport = onSelectSport,
             onSelectMatch = onSelectBasketballMatch,
             onUpdateLinesAndOdds = onUpdateBasketballOdds,
+            onNavigateToAnalyze = onNavigateToAnalyze
+        )
+        return
+    }
+    if (uiState.sportMode == SportMode.TENNIS) {
+        TennisMatrixContent(
+            uiState = uiState,
+            onSelectSport = onSelectSport,
+            onSelectMatch = onSelectTennisMatch,
+            onUpdateLinesAndOdds = onUpdateTennisOdds,
             onNavigateToAnalyze = onNavigateToAnalyze
         )
         return

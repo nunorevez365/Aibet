@@ -261,4 +261,99 @@ class QuantEngineTest {
         assertEquals("Boston Celtics", restored.matches[0].equipaCasa)
         assertEquals(56.5, restored.matches[0].q1TotalLine, 1e-6)
     }
+
+    @Test
+    fun tennisQuantEngine_markovSetsMonteCarloAndCache_workAccurately() {
+        val setDist = com.example.quant.TennisQuantEngine.computeExactSetDistribution(0.84, 0.76)
+        assertEquals(1.0, setDist.outcomes.sumOf { it.probability }, 1e-6)
+        assertTrue(setDist.probP1WinsSet > 0.60)
+        assertTrue(setDist.expectedGames in 8.5..11.0)
+
+        val sampleTennis = listOf(
+            com.example.quant.RawTennisMatchData(
+                id = "atp1", dataHoraWet = "21/11 14:00 WET", torneio = "Davis Cup Finals",
+                ronda = "Quartos de Final", circuito = "ATP", superficie = com.example.quant.TennisSurface.INDOOR,
+                bestOfSets = 3, jogador1 = "Jannik Sinner", jogador2 = "Alex de Minaur",
+                ranking1 = 1, ranking2 = 9, serveHoldProb1 = 0.87, serveHoldProb2 = 0.77,
+                surfaceNotes = "Indoor rápido", totalGamesLine = 21.5, p1GameHandicapLine = -3.5,
+                oddP1Ml = 1.24, oddP2Ml = 4.20, oddP1Set1 = 1.32, oddP2Set1 = 3.35,
+                oddGamesOver = 1.88, oddGamesUnder = 1.88, oddP1GameHc = 1.88, oddP2GameHc = 1.88,
+                oddP1StraightSets = 1.65, oddOverSets = 2.60, oddTiebreakYes = 2.25
+            ),
+            com.example.quant.RawTennisMatchData(
+                id = "atp2", dataHoraWet = "21/11 16:30 WET", torneio = "Davis Cup Finals",
+                ronda = "Quartos de Final", circuito = "ATP", superficie = com.example.quant.TennisSurface.INDOOR,
+                bestOfSets = 3, jogador1 = "Carlos Alcaraz", jogador2 = "Taylor Fritz",
+                ranking1 = 2, ranking2 = 5, serveHoldProb1 = 0.84, serveHoldProb2 = 0.83,
+                surfaceNotes = "Serviço equilibrado", totalGamesLine = 23.5, p1GameHandicapLine = -1.5,
+                oddP1Ml = 1.68, oddP2Ml = 2.20, oddP1Set1 = 1.72, oddP2Set1 = 2.12,
+                oddGamesOver = 1.87, oddGamesUnder = 1.87, oddP1GameHc = 1.88, oddP2GameHc = 1.88,
+                oddP1StraightSets = 2.55, oddOverSets = 2.15, oddTiebreakYes = 1.78
+            ),
+            com.example.quant.RawTennisMatchData(
+                id = "wta1", dataHoraWet = "21/11 18:00 WET", torneio = "WTA Finals",
+                ronda = "Meia-Final", circuito = "WTA", superficie = com.example.quant.TennisSurface.HARD,
+                bestOfSets = 3, jogador1 = "Aryna Sabalenka", jogador2 = "Coco Gauff",
+                ranking1 = 1, ranking2 = 3, serveHoldProb1 = 0.74, serveHoldProb2 = 0.69,
+                surfaceNotes = "Piso rápido", totalGamesLine = 22.5, p1GameHandicapLine = -2.5,
+                oddP1Ml = 1.58, oddP2Ml = 2.40, oddP1Set1 = 1.64, oddP2Set1 = 2.25,
+                oddGamesOver = 1.88, oddGamesUnder = 1.88, oddP1GameHc = 1.88, oddP2GameHc = 1.88,
+                oddP1StraightSets = 2.35, oddOverSets = 2.20, oddTiebreakYes = 2.45
+            )
+        )
+
+        val cycle = QuantEngine.buildCycleInfoForDates(listOf("2026-11-21"))
+        val fetch = com.example.quant.TennisFetchResult(
+            cycleInfo = cycle,
+            matches = sampleTennis,
+            sources = emptyList(),
+            searchQueries = listOf("ESPN ATP/WTA Scoreboard"),
+            modelSummaryNote = "Teste Ténis"
+        )
+
+        val bundle = com.example.quant.TennisQuantEngine.buildAnalysisBundle(fetch, StakeMode.FREEBET, 5.0)
+        assertEquals(3, bundle.matches.size)
+        assertEquals(11, bundle.matches[0].markets.size)
+        assertEquals(4, bundle.matches[0].setScoreDistribution.size)
+        assertEquals(1.0, bundle.matches[0].setScoreDistribution.sumOf { it.probability }, 1e-6)
+        assertTrue(bundle.matches[0].probP1Win > 0.72)
+        assertEquals(100_000, bundle.monteCarloBase.iterations)
+        assertTrue(bundle.monteCarloBase.probAtLeastOneWin in 0.05..1.0)
+        assertTrue(bundle.monteCarloBase.expectedNetReturn > 0.0)
+
+        // Verify ESPN nested groupings JSON parser & Tennis Room cache JSON round-trip
+        val espnTn = com.example.data.EspnTennisDataSource()
+        val sampleJson = """
+            {
+              "events": [{
+                "name": "Roland Garros",
+                "groupings": [{
+                  "grouping": { "slug": "mens-singles" },
+                  "competitions": [{
+                    "id": "9001",
+                    "date": "2026-11-21T14:00Z",
+                    "status": { "type": { "state": "pre" } },
+                    "round": { "displayName": "Quarterfinals" },
+                    "competitors": [
+                      { "athlete": { "displayName": "Carlos Alcaraz" }, "curatedRank": { "current": 2 } },
+                      { "athlete": { "displayName": "Alexander Zverev" }, "curatedRank": { "current": 3 } }
+                    ]
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+        val parsed = espnTn.parseScoreboardJson(sampleJson, "atp", "ATP", emptyMap(), setOf("2026-11-21"))
+        assertEquals(1, parsed.size)
+        assertEquals(com.example.quant.TennisSurface.CLAY, parsed[0].superficie)
+        assertEquals(5, parsed[0].bestOfSets)
+        assertEquals("Carlos Alcaraz", parsed[0].jogador1)
+
+        val json = com.example.data.AnalysisCacheStore.serializeTennisFetchResult(fetch)
+        val restored = com.example.data.AnalysisCacheStore.deserializeTennisFetchResult(json)
+        assertTrue(restored != null)
+        assertEquals(3, restored!!.matches.size)
+        assertEquals("Jannik Sinner", restored.matches[0].jogador1)
+        assertEquals(com.example.quant.TennisSurface.INDOOR, restored.matches[0].superficie)
+    }
 }

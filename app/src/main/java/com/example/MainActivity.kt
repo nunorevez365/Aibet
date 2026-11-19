@@ -13,6 +13,7 @@ import com.example.data.BasketballRepository
 import com.example.data.BetDatabase
 import com.example.data.BetHistoryRepository
 import com.example.data.GeminiRepository
+import com.example.data.TennisRepository
 import com.example.ui.BetViewModel
 import com.example.ui.MainScreen
 import com.example.ui.theme.BetQuantTheme
@@ -35,9 +36,11 @@ class MainActivity : ComponentActivity() {
         val cacheStore = AnalysisCacheStore(applicationContext, database.cachedAnalysisDao())
         val geminiRepository = GeminiRepository()
         val basketballRepository = BasketballRepository()
+        val tennisRepository = TennisRepository()
         val viewModelFactory = BetViewModel.Factory(
             geminiRepository = geminiRepository,
             basketballRepository = basketballRepository,
+            tennisRepository = tennisRepository,
             historyRepository = historyRepository,
             cacheStore = cacheStore
         )

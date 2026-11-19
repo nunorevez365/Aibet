@@ -1,8 +1,9 @@
 package com.example.quant
 
-enum class SportMode(val label: String) {
-    FOOTBALL("Futebol"),
-    BASKETBALL("Basquetebol")
+enum class SportMode(val label: String, val shortLabel: String) {
+    FOOTBALL("Futebol", "Futebol"),
+    BASKETBALL("Basquetebol", "Basquet"),
+    TENNIS("Ténis", "Ténis")
 }
 
 enum class BasketballMarketType(val code: String, val displayName: String) {
