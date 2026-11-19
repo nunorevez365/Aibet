@@ -1,0 +1,44 @@
+workflows:
+  betquant-android-apk:
+    name: BetQuant AI Android APK
+    max_build_duration: 30
+    instance_type: linux_x2
+    environment:
+      java: 21
+    scripts:
+      - name: Configure Android SDK and accept licenses
+        script: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "sdk.dir=$SDK_DIR" > "$CM_BUILD_DIR/local.properties"
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Install Gradle 9.3.1
+        script: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-9.3.1-bin.zip -o /tmp/gradle-9.3.1.zip
+          unzip -q /tmp/gradle-9.3.1.zip -d /tmp
+          /tmp/gradle-9.3.1/bin/gradle --version
+
+      - name: Ensure debug keystore exists on runner
+        script: |
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Build BetQuant AI Debug APK
+        script: |
+          /tmp/gradle-9.3.1/bin/gradle :app:assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk BetQuantAI.apk
+
+    artifacts:
+      - BetQuantAI.apk
+      - app/build/outputs/apk/debug/app-debug.apk
