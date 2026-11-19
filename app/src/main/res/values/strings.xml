@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">BetQuant AI</string>
+    <string name="app_subtitle">Motor Quantitativo • Betclic PT</string>
+    <string name="tab_slips">Boletins</string>
+    <string name="tab_matrix">Matriz Quant</string>
+    <string name="tab_history">Histórico/ROI</string>
+    <string name="cta_analyze_generate">Analisar &amp; Gerar Boletins</string>
+    <string name="cta_analyzing">A executar pipeline quantitativo…</string>
+    <string name="cta_retry">Tentar Novamente</string>
+    <string name="mode_freebet">Modo Freebet</string>
+    <string name="mode_real_bankroll">Banca Real</string>
+    <string name="label_budget_freebet">Valor da Freebet (€)</string>
+    <string name="label_budget_real">Banca Total (€)</string>
+    <string name="label_save_slip">Guardar Boletim</string>
+    <string name="label_save_all_slips">Guardar os 3 Boletins</string>
+    <string name="label_saved">Guardado</string>
+    <string name="label_monte_carlo_title">Simulação Monte Carlo (100.000 iterações)</string>
+    <string name="label_sources_title">Fontes Verificadas (Google Search Grounding)</string>
+    <string name="label_variant_base">Versão Base</string>
+    <string name="label_variant_full">Versão Completa</string>
+    <string name="label_status_won">Ganho</string>
+    <string name="label_status_lost">Perdido</string>
+    <string name="label_status_pending">Pendente</string>
+    <string name="label_filter_all">Todos</string>
+    <string name="empty_slips_title">Pronto para Análise em Tempo Real</string>
+    <string name="empty_slips_desc">Toca em "Analisar &amp; Gerar Boletins" para consultar calendários oficiais WET/WEST, xG, lesões e odds via Google Search Grounding e calcular Poisson 12x12 + Dixon-Coles + Monte Carlo 100k.</string>
+    <string name="empty_matrix_title">Sem Matriz Calculada</string>
+    <string name="empty_matrix_desc">Executa primeiro a análise no separador Boletins para gerar as matrizes 12x12 de Dixon-Coles, ratings Elo e cálculo de Edge / Kelly.</string>
+    <string name="empty_history_title">Histórico de ROI Vazio</string>
+    <string name="empty_history_desc">Guarda os boletins gerados na base de dados local Room para marcar resultados como Ganho ou Perdido e acompanhar o lucro líquido real acumulado.</string>
+    <string name="cd_hero_banner">Ilustração quantitativa de campo de futebol e curva de Poisson</string>
+    <string name="cd_delete_slip">Eliminar boletim do histórico</string>
+    <string name="cd_refresh_analysis">Atualizar análise quantitativa</string>
+    <string name="cd_info_cycle">Informação do ciclo temporal ativo</string>
+</resources>

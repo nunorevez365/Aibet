@@ -1,0 +1,6 @@
+{
+  "name": "BetQuant AI",
+  "description": "Aplicação Android quantitativa de análise probabilística de futebol (Poisson 12x12, Dixon-Coles, Elo, +EV, Kelly 1/4, Monte Carlo 100k) com dados em tempo real via Gemini + Google Search Grounding e histórico ROI em Room.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
