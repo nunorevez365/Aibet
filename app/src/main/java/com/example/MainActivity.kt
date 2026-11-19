@@ -8,6 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ai.configureAppCheck
+import com.example.data.AnalysisCacheStore
+import com.example.data.BasketballRepository
 import com.example.data.BetDatabase
 import com.example.data.BetHistoryRepository
 import com.example.data.GeminiRepository
@@ -30,10 +32,14 @@ class MainActivity : ComponentActivity() {
 
         val database = BetDatabase.getInstance(applicationContext)
         val historyRepository = BetHistoryRepository(database.betSlipDao())
+        val cacheStore = AnalysisCacheStore(applicationContext, database.cachedAnalysisDao())
         val geminiRepository = GeminiRepository()
+        val basketballRepository = BasketballRepository()
         val viewModelFactory = BetViewModel.Factory(
             geminiRepository = geminiRepository,
-            historyRepository = historyRepository
+            basketballRepository = basketballRepository,
+            historyRepository = historyRepository,
+            cacheStore = cacheStore
         )
 
         setContent {

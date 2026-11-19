@@ -233,25 +233,36 @@ fun MainScreen(viewModel: BetViewModel) {
                             when (tabIndex) {
                                 0 -> BoletinsTab(
                                     uiState = uiState,
+                                    onSelectSport = viewModel::setSportMode,
                                     onSelectCyclePreset = viewModel::selectCyclePreset,
                                     onToggleDate = viewModel::toggleDateSelection,
                                     onAnalyzeClick = viewModel::analyzeAndGenerateSlips,
+                                    onRestoreCachedAnalysis = viewModel::restoreLastCachedAnalysis,
                                     onStakeModeChange = viewModel::setStakeMode,
                                     onBudgetInputChange = viewModel::onBudgetInputChanged,
                                     onBudgetPresetClick = viewModel::selectBudgetPreset,
                                     onToggleSlip3Variant = viewModel::setUseFullLeverageSlip3,
                                     onSaveSlip = viewModel::saveSlipToHistory,
                                     onSaveAllSlips = viewModel::saveAllActiveSlips,
+                                    onSaveBasketballSlip = viewModel::saveBasketballSlipToHistory,
+                                    onSaveAllBasketballSlips = viewModel::saveAllActiveBasketballSlips,
                                     onOpenMatrixForMatch = { matchIdx ->
                                         viewModel.selectMatchIndex(matchIdx)
+                                        selectedTab = 1
+                                    },
+                                    onOpenMatrixForBasketballMatch = { matchIdx ->
+                                        viewModel.selectBasketballMatchIndex(matchIdx)
                                         selectedTab = 1
                                     }
                                 )
                                 1 -> QuantMatrixTab(
                                     uiState = uiState,
+                                    onSelectSport = viewModel::setSportMode,
                                     onSelectMatch = viewModel::selectMatchIndex,
+                                    onSelectBasketballMatch = viewModel::selectBasketballMatchIndex,
                                     onToggleFullMatrix = viewModel::toggleFull12x12Matrix,
                                     onUpdateMatchOdds = viewModel::updateMatchOdds,
+                                    onUpdateBasketballOdds = viewModel::updateBasketballLinesAndOdds,
                                     onNavigateToAnalyze = { selectedTab = 0 }
                                 )
                                 else -> HistoryRoiTab(

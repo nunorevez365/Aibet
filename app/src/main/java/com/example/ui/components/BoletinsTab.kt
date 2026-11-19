@@ -78,15 +78,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.quant.AnalysisBundle
+import com.example.quant.BasketballSlip
 import com.example.quant.CyclePreset
 import com.example.quant.GeneratedSlip
 import com.example.quant.GroundingSource
 import com.example.quant.MonteCarloReport
 import com.example.quant.QuantEngine
 import com.example.quant.SelectableDay
+import com.example.quant.SportMode
 import com.example.quant.StakeMode
 import com.example.quant.TemporalCycleInfo
 import com.example.ui.AnalysisUiState
+import com.example.ui.BasketballUiState
 import com.example.ui.BetUiState
 import com.example.ui.QuantFormatters
 import com.example.ui.theme.MonoFontFamily
@@ -94,24 +97,46 @@ import com.example.ui.theme.MonoFontFamily
 @Composable
 fun BoletinsTab(
     uiState: BetUiState,
+    onSelectSport: (SportMode) -> Unit,
     onSelectCyclePreset: (CyclePreset) -> Unit,
     onToggleDate: (String) -> Unit,
     onAnalyzeClick: () -> Unit,
+    onRestoreCachedAnalysis: () -> Unit,
     onStakeModeChange: (StakeMode) -> Unit,
     onBudgetInputChange: (String) -> Unit,
     onBudgetPresetClick: (Double) -> Unit,
     onToggleSlip3Variant: (Boolean) -> Unit,
     onSaveSlip: (GeneratedSlip) -> Unit,
     onSaveAllSlips: () -> Unit,
-    onOpenMatrixForMatch: (Int) -> Unit
+    onSaveBasketballSlip: (BasketballSlip) -> Unit,
+    onSaveAllBasketballSlips: () -> Unit,
+    onOpenMatrixForMatch: (Int) -> Unit,
+    onOpenMatrixForBasketballMatch: (Int) -> Unit
 ) {
+    val isBasketball = uiState.sportMode == SportMode.BASKETBALL
+    val isCurrentlyLoading = if (isBasketball) {
+        uiState.basketballState is BasketballUiState.Analyzing
+    } else {
+        uiState.analysisState is AnalysisUiState.Analyzing
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item(key = "hero_header") {
-            QuantHeroBanner(cycleInfo = uiState.cycleInfo)
+            QuantHeroBanner(
+                cycleInfo = uiState.cycleInfo,
+                sportMode = uiState.sportMode
+            )
+        }
+
+        item(key = "sport_mode_switcher") {
+            SportModeSelectorRow(
+                sportMode = uiState.sportMode,
+                onSelectSport = onSelectSport
+            )
         }
 
         item(key = "cycle_day_selector") {
@@ -137,15 +162,149 @@ fun BoletinsTab(
 
         item(key = "cta_analyze") {
             AnalyzePipelineButton(
-                analysisState = uiState.analysisState,
+                isLoading = isCurrentlyLoading,
+                sportMode = uiState.sportMode,
                 onClick = onAnalyzeClick
             )
         }
 
+        if (isBasketball) {
+            when (val bkState = uiState.basketballState) {
+                is BasketballUiState.Idle -> {
+                    item(key = "bk_idle") {
+                        IdleMethodologyCard(sportMode = SportMode.BASKETBALL)
+                    }
+                }
+                is BasketballUiState.Analyzing -> {
+                    item(key = "bk_analyzing") {
+                        PipelineProgressCard(
+                            stepIndex = bkState.stepIndex,
+                            stepLabel = bkState.stepLabel
+                        )
+                    }
+                }
+                is BasketballUiState.Error -> {
+                    item(key = "bk_error") {
+                        ErrorCard(
+                            message = bkState.message,
+                            canRestoreCached = bkState.canRestoreCached,
+                            onRetry = onAnalyzeClick,
+                            onRestoreCached = onRestoreCachedAnalysis
+                        )
+                    }
+                }
+                is BasketballUiState.Success -> {
+                    val bundle = bkState.bundle
+                    val activeSlip3 = if (uiState.useFullLeverageSlip3) bundle.slip3Full else bundle.slip3Base
+                    val activeMc = if (uiState.useFullLeverageSlip3) bundle.monteCarloFull else bundle.monteCarloBase
+
+                    item(key = "bk_monte_carlo") {
+                        MonteCarloTelemetryCard(
+                            report = activeMc,
+                            stakeMode = bundle.stakeMode,
+                            matchCount = bundle.matches.size,
+                            summaryNote = bundle.modelSummaryNote
+                        )
+                    }
+
+                    item(key = "bk_slips_header") {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Boletins Basquetebol (3)",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Text(
+                                    text = "Pontos por Quarto Q1–Q4 + Handicap + Over/Under + Margem Segura",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onSaveAllBasketballSlips,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .testTag("save_all_basket_slips_button"),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.BookmarkAdded,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.label_save_all_slips),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    item(key = "bk_slip_1") {
+                        BasketballSlipCard(
+                            slip = bundle.slip1,
+                            accentColor = MaterialTheme.colorScheme.primary,
+                            accentContainer = MaterialTheme.colorScheme.primaryContainer,
+                            isSaved = uiState.savedBasketballSlipKeys.contains("${bundle.slip1.type.code}_${bundle.slip1.isFullLeverageVariant}"),
+                            bundle = bundle,
+                            onSave = { onSaveBasketballSlip(bundle.slip1) },
+                            onOpenMatchMatrix = onOpenMatrixForBasketballMatch
+                        )
+                    }
+
+                    item(key = "bk_slip_2") {
+                        BasketballSlipCard(
+                            slip = bundle.slip2,
+                            accentColor = MaterialTheme.colorScheme.secondary,
+                            accentContainer = MaterialTheme.colorScheme.secondaryContainer,
+                            isSaved = uiState.savedBasketballSlipKeys.contains("${bundle.slip2.type.code}_${bundle.slip2.isFullLeverageVariant}"),
+                            bundle = bundle,
+                            onSave = { onSaveBasketballSlip(bundle.slip2) },
+                            onOpenMatchMatrix = onOpenMatrixForBasketballMatch
+                        )
+                    }
+
+                    item(key = "bk_slip_3") {
+                        BasketballSlipCard(
+                            slip = activeSlip3,
+                            accentColor = MaterialTheme.colorScheme.tertiary,
+                            accentContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                            isSaved = uiState.savedBasketballSlipKeys.contains("${activeSlip3.type.code}_${activeSlip3.isFullLeverageVariant}"),
+                            bundle = bundle,
+                            showLeverageToggle = true,
+                            isFullLeverage = uiState.useFullLeverageSlip3,
+                            onToggleLeverage = onToggleSlip3Variant,
+                            onSave = { onSaveBasketballSlip(activeSlip3) },
+                            onOpenMatchMatrix = onOpenMatrixForBasketballMatch
+                        )
+                    }
+
+                    if (bundle.groundingSources.isNotEmpty() || bundle.searchQueries.isNotEmpty()) {
+                        item(key = "bk_sources") {
+                            GroundingSourcesCard(
+                                sources = bundle.groundingSources,
+                                queries = bundle.searchQueries
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
         when (val state = uiState.analysisState) {
             is AnalysisUiState.Idle -> {
                 item(key = "idle_state") {
-                    IdleMethodologyCard()
+                    IdleMethodologyCard(sportMode = SportMode.FOOTBALL)
                 }
             }
 
@@ -162,7 +321,9 @@ fun BoletinsTab(
                 item(key = "error_card") {
                     ErrorCard(
                         message = state.message,
-                        onRetry = onAnalyzeClick
+                        canRestoreCached = state.canRestoreCached,
+                        onRetry = onAnalyzeClick,
+                        onRestoreCached = onRestoreCachedAnalysis
                     )
                 }
             }
@@ -272,11 +433,15 @@ fun BoletinsTab(
                 }
             }
         }
+        }
     }
 }
 
 @Composable
-private fun QuantHeroBanner(cycleInfo: TemporalCycleInfo) {
+private fun QuantHeroBanner(
+    cycleInfo: TemporalCycleInfo,
+    sportMode: SportMode
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -373,8 +538,13 @@ private fun QuantHeroBanner(cycleInfo: TemporalCycleInfo) {
                     color = MaterialTheme.colorScheme.secondary
                 )
 
+                val targetCompText = if (sportMode == SportMode.BASKETBALL) {
+                    "NBA, WNBA & NCAA • Pontos por Quarto (Q1–Q4), Handicap, Over/Under e Margem Segura Betclic"
+                } else {
+                    cycleInfo.cycle.targetCompetitions
+                }
                 Text(
-                    text = cycleInfo.cycle.targetCompetitions,
+                    text = targetCompText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -842,10 +1012,26 @@ private fun AllocationPill(
 
 @Composable
 private fun AnalyzePipelineButton(
-    analysisState: AnalysisUiState,
+    isLoading: Boolean,
+    sportMode: SportMode,
     onClick: () -> Unit
 ) {
-    val isLoading = analysisState is AnalysisUiState.Analyzing
+    val accentBg = if (sportMode == SportMode.BASKETBALL) {
+        MaterialTheme.colorScheme.tertiary
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    val accentFg = if (sportMode == SportMode.BASKETBALL) {
+        MaterialTheme.colorScheme.onTertiary
+    } else {
+        MaterialTheme.colorScheme.onPrimary
+    }
+    val ctaLabel = if (sportMode == SportMode.BASKETBALL) {
+        "Analisar Basquetebol & Gerar Boletins"
+    } else {
+        stringResource(R.string.cta_analyze_generate)
+    }
+
     Button(
         onClick = onClick,
         enabled = !isLoading,
@@ -855,8 +1041,8 @@ private fun AnalyzePipelineButton(
             .testTag("analyze_generate_button"),
         shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = accentBg,
+            contentColor = accentFg,
             disabledContainerColor = MaterialTheme.colorScheme.primaryContainer,
             disabledContentColor = MaterialTheme.colorScheme.primary
         )
@@ -870,7 +1056,9 @@ private fun AnalyzePipelineButton(
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = stringResource(R.string.cta_analyzing),
-                style = MaterialTheme.typography.titleSmall
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         } else {
             Icon(
@@ -880,9 +1068,12 @@ private fun AnalyzePipelineButton(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = stringResource(R.string.cta_analyze_generate),
+                text = ctaLabel,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -934,7 +1125,12 @@ private fun PipelineProgressCard(stepIndex: Int, stepLabel: String) {
 }
 
 @Composable
-private fun ErrorCard(message: String, onRetry: () -> Unit) {
+private fun ErrorCard(
+    message: String,
+    canRestoreCached: Boolean,
+    onRetry: () -> Unit,
+    onRestoreCached: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -968,6 +1164,7 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
             OutlinedButton(
                 onClick = onRetry,
                 modifier = Modifier
+                    .fillMaxWidth()
                     .heightIn(min = 48.dp)
                     .testTag("retry_analyze_button"),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
@@ -980,15 +1177,35 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = stringResource(R.string.cta_retry),
-                    color = MaterialTheme.colorScheme.error
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                    softWrap = false
                 )
+            }
+            if (canRestoreCached) {
+                OutlinedButton(
+                    onClick = onRestoreCached,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("restore_cached_analysis_button"),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary)
+                ) {
+                    Text(
+                        text = "Restaurar Última Análise Guardada",
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun IdleMethodologyCard() {
+private fun IdleMethodologyCard(sportMode: SportMode) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -1000,20 +1217,34 @@ private fun IdleMethodologyCard() {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = stringResource(R.string.empty_slips_title),
+                text = if (sportMode == SportMode.BASKETBALL) {
+                    "Motor Quantitativo de Basquetebol Pronto"
+                } else {
+                    stringResource(R.string.empty_slips_title)
+                },
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = stringResource(R.string.empty_slips_desc),
+                text = if (sportMode == SportMode.BASKETBALL) {
+                    "Escolhe os dias e carrega em Analisar para projetar pontos por quarto (Q1–Q4), margens/handicaps e totais da Betclic."
+                } else {
+                    stringResource(R.string.empty_slips_desc)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PipelineBadgeLine("1", "Calendário oficial em tempo real nos dias escolhidos + classificações, golos e odds Betclic")
-                PipelineBadgeLine("2", "Motor local Kotlin: Matriz Poisson 12×12 + Dixon-Coles (ρ = -0.13) + Elo dinâmico")
-                PipelineBadgeLine("3", "Valuation: Edge real, +EV (Real / Freebet SNR), Kelly 1/4 e Monte Carlo 100.000×")
+                if (sportMode == SportMode.BASKETBALL) {
+                    PipelineBadgeLine("1", "Calendário oficial NBA/NCAA em tempo real nos dias escolhidos + médias PPG/OPPG e linhas")
+                    PipelineBadgeLine("2", "Projeção por quartos (Q1, Q2, Q3, Q4, 1ª Parte) + distribuição Normal de margens e totais")
+                    PipelineBadgeLine("3", "Mercados Betclic: Q1 Pontos, Handicap, Over/Under, Margem Segura, Kelly 1/4 e Monte Carlo 100.000×")
+                } else {
+                    PipelineBadgeLine("1", "Calendário oficial em tempo real nos dias escolhidos + classificações, golos e odds Betclic")
+                    PipelineBadgeLine("2", "Motor local Kotlin: Matriz Poisson 12×12 + Dixon-Coles (ρ = -0.13) + Elo dinâmico")
+                    PipelineBadgeLine("3", "Valuation: Edge real, +EV (Real / Freebet SNR), Kelly 1/4 e Monte Carlo 100.000×")
+                }
             }
         }
     }

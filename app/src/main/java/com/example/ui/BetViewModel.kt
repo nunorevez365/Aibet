@@ -4,10 +4,17 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.AnalysisCacheStore
+import com.example.data.BasketballRepository
 import com.example.data.BetHistoryRepository
 import com.example.data.BetSlipEntity
 import com.example.data.GeminiRepository
+import com.example.data.SavedUserSettings
 import com.example.quant.AnalysisBundle
+import com.example.quant.BasketballAnalysisBundle
+import com.example.quant.BasketballFetchResult
+import com.example.quant.BasketballQuantEngine
+import com.example.quant.BasketballSlip
 import com.example.quant.BetStatus
 import com.example.quant.CyclePreset
 import com.example.quant.GeneratedSlip
@@ -15,6 +22,7 @@ import com.example.quant.GroundedFetchResult
 import com.example.quant.QuantEngine
 import com.example.quant.RoiSummary
 import com.example.quant.SelectableDay
+import com.example.quant.SportMode
 import com.example.quant.StakeMode
 import com.example.quant.TemporalCycleInfo
 import kotlinx.coroutines.CancellationException
@@ -38,7 +46,14 @@ sealed interface AnalysisUiState {
     data object Idle : AnalysisUiState
     data class Analyzing(val stepIndex: Int, val stepLabel: String) : AnalysisUiState
     data class Success(val bundle: AnalysisBundle) : AnalysisUiState
-    data class Error(val message: String) : AnalysisUiState
+    data class Error(val message: String, val canRestoreCached: Boolean = false) : AnalysisUiState
+}
+
+sealed interface BasketballUiState {
+    data object Idle : BasketballUiState
+    data class Analyzing(val stepIndex: Int, val stepLabel: String) : BasketballUiState
+    data class Success(val bundle: BasketballAnalysisBundle) : BasketballUiState
+    data class Error(val message: String, val canRestoreCached: Boolean = false) : BasketballUiState
 }
 
 enum class HistoryFilter(val label: String) {
@@ -49,6 +64,7 @@ enum class HistoryFilter(val label: String) {
 }
 
 data class BetUiState(
+    val sportMode: SportMode = SportMode.FOOTBALL,
     val selectableDays: List<SelectableDay> = QuantEngine.buildSelectableDays(dayCount = 10),
     val activePreset: CyclePreset = CyclePreset.WEEKEND_FRI_SUN,
     val selectedDatesIso: Set<String> = QuantEngine.getDatesForPreset(CyclePreset.WEEKEND_FRI_SUN).toSet(),
@@ -60,18 +76,24 @@ data class BetUiState(
     val budgetAmount: Double = 5.0,
     val useFullLeverageSlip3: Boolean = false,
     val selectedMatchIndex: Int = 0,
+    val selectedBasketballMatchIndex: Int = 0,
     val showFull12x12Matrix: Boolean = false,
     val historyFilter: HistoryFilter = HistoryFilter.ALL,
     val savedSlipKeys: Set<String> = emptySet(),
-    val analysisState: AnalysisUiState = AnalysisUiState.Idle
+    val savedBasketballSlipKeys: Set<String> = emptySet(),
+    val analysisState: AnalysisUiState = AnalysisUiState.Idle,
+    val basketballState: BasketballUiState = BasketballUiState.Idle
 )
 
 class BetViewModel(
     private val geminiRepository: GeminiRepository,
-    private val historyRepository: BetHistoryRepository
+    private val basketballRepository: BasketballRepository = BasketballRepository(),
+    private val historyRepository: BetHistoryRepository,
+    private val cacheStore: AnalysisCacheStore? = null
 ) : ViewModel() {
 
     private var lastFetchResult: GroundedFetchResult? = null
+    private var lastBasketballFetchResult: BasketballFetchResult? = null
 
     private val _uiState = MutableStateFlow(BetUiState())
     val uiState: StateFlow<BetUiState> = _uiState.asStateFlow()
@@ -94,6 +116,88 @@ class BetViewModel(
             initialValue = BetHistoryRepository.computeRoiSummary(emptyList())
         )
 
+    init {
+        restorePersistedState()
+    }
+
+    private fun restorePersistedState() {
+        val store = cacheStore ?: return
+        viewModelScope.launch {
+            val validIsoSet = _uiState.value.selectableDays.map { it.isoDate }.toSet()
+            val savedSettings = withContext(Dispatchers.IO) {
+                store.loadSettings(validIsoSet)
+            }
+            if (savedSettings != null) {
+                val restoredCycle = QuantEngine.buildCycleInfoForDates(savedSettings.selectedDatesIso)
+                _uiState.update {
+                    it.copy(
+                        sportMode = savedSettings.sportMode,
+                        stakeMode = savedSettings.stakeMode,
+                        budgetAmount = savedSettings.budgetAmount,
+                        budgetInput = String.format(java.util.Locale.US, "%.2f", savedSettings.budgetAmount),
+                        useFullLeverageSlip3 = savedSettings.useFullLeverageSlip3,
+                        activePreset = savedSettings.activePreset,
+                        selectedDatesIso = savedSettings.selectedDatesIso,
+                        cycleInfo = restoredCycle
+                    )
+                }
+            }
+
+            val cachedFootball = withContext(Dispatchers.IO) {
+                runCatching { store.loadLatestAnalysis() }.getOrNull()
+            }
+            if (cachedFootball != null && cachedFootball.matches.size >= 2) {
+                lastFetchResult = cachedFootball
+                val snapshot = _uiState.value
+                val restoredBundle = withContext(Dispatchers.Default) {
+                    QuantEngine.buildAnalysisBundle(
+                        fetchResult = cachedFootball,
+                        stakeMode = snapshot.stakeMode,
+                        totalBudget = snapshot.budgetAmount
+                    )
+                }
+                _uiState.update { it.copy(analysisState = AnalysisUiState.Success(restoredBundle)) }
+            }
+
+            val cachedBasket = withContext(Dispatchers.IO) {
+                runCatching { store.loadLatestBasketballAnalysis() }.getOrNull()
+            }
+            if (cachedBasket != null && cachedBasket.matches.size >= 2) {
+                lastBasketballFetchResult = cachedBasket
+                val snapshot = _uiState.value
+                val restoredBasket = withContext(Dispatchers.Default) {
+                    BasketballQuantEngine.buildAnalysisBundle(
+                        fetchResult = cachedBasket,
+                        stakeMode = snapshot.stakeMode,
+                        totalBudget = snapshot.budgetAmount
+                    )
+                }
+                _uiState.update { it.copy(basketballState = BasketballUiState.Success(restoredBasket)) }
+            }
+        }
+    }
+
+    private fun persistCurrentSettings() {
+        val store = cacheStore ?: return
+        val s = _uiState.value
+        store.saveSettings(
+            SavedUserSettings(
+                sportMode = s.sportMode,
+                stakeMode = s.stakeMode,
+                budgetAmount = s.budgetAmount,
+                useFullLeverageSlip3 = s.useFullLeverageSlip3,
+                activePreset = s.activePreset,
+                selectedDatesIso = s.selectedDatesIso
+            )
+        )
+    }
+
+    fun setSportMode(mode: SportMode) {
+        if (_uiState.value.sportMode == mode) return
+        _uiState.update { it.copy(sportMode = mode) }
+        persistCurrentSettings()
+    }
+
     fun selectCyclePreset(preset: CyclePreset) {
         val now = System.currentTimeMillis()
         val days = QuantEngine.buildSelectableDays(nowMillis = now, dayCount = 10)
@@ -107,6 +211,7 @@ class BetViewModel(
                 cycleInfo = updatedCycle
             )
         }
+        persistCurrentSettings()
     }
 
     fun toggleDateSelection(isoDate: String) {
@@ -125,6 +230,7 @@ class BetViewModel(
                 cycleInfo = updatedCycle
             )
         }
+        persistCurrentSettings()
     }
 
     fun setStakeMode(mode: StakeMode) {
@@ -144,9 +250,11 @@ class BetViewModel(
                 stakeMode = mode,
                 budgetAmount = nextBudget,
                 budgetInput = String.format(java.util.Locale.US, "%.2f", nextBudget),
-                savedSlipKeys = emptySet()
+                savedSlipKeys = emptySet(),
+                savedBasketballSlipKeys = emptySet()
             )
         }
+        persistCurrentSettings()
         recalculateLocallyIfReady()
     }
 
@@ -157,10 +265,12 @@ class BetViewModel(
             it.copy(
                 budgetInput = raw,
                 budgetAmount = parsed?.coerceIn(1.0, 50_000.0) ?: it.budgetAmount,
-                savedSlipKeys = emptySet()
+                savedSlipKeys = emptySet(),
+                savedBasketballSlipKeys = emptySet()
             )
         }
         if (parsed != null && parsed >= 1.0) {
+            persistCurrentSettings()
             recalculateLocallyIfReady()
         }
     }
@@ -170,18 +280,25 @@ class BetViewModel(
             it.copy(
                 budgetAmount = amount,
                 budgetInput = String.format(java.util.Locale.US, "%.2f", amount),
-                savedSlipKeys = emptySet()
+                savedSlipKeys = emptySet(),
+                savedBasketballSlipKeys = emptySet()
             )
         }
+        persistCurrentSettings()
         recalculateLocallyIfReady()
     }
 
     fun setUseFullLeverageSlip3(useFull: Boolean) {
         _uiState.update { it.copy(useFullLeverageSlip3 = useFull) }
+        persistCurrentSettings()
     }
 
     fun selectMatchIndex(index: Int) {
         _uiState.update { it.copy(selectedMatchIndex = index.coerceAtLeast(0)) }
+    }
+
+    fun selectBasketballMatchIndex(index: Int) {
+        _uiState.update { it.copy(selectedBasketballMatchIndex = index.coerceAtLeast(0)) }
     }
 
     fun toggleFull12x12Matrix() {
@@ -192,19 +309,44 @@ class BetViewModel(
         _uiState.update { it.copy(historyFilter = filter) }
     }
 
-    /**
-     * Executes the complete 5-step BetQuant AI pipeline:
-     * 1. Portugal WET/WEST cycle detection
-     * 2. Gemini + Google Search Grounding structured JSON fetch
-     * 3. Local Poisson 12x12 + Dixon-Coles (rho = -0.13) + Elo + Edge/Kelly
-     * 4. 3-Slip portfolio builder + 100,000 correlated Monte Carlo iterations
-     */
+    fun restoreLastCachedAnalysis() {
+        if (_uiState.value.sportMode == SportMode.BASKETBALL) {
+            val cached = lastBasketballFetchResult ?: return
+            val snapshot = _uiState.value
+            viewModelScope.launch {
+                val bundle = withContext(Dispatchers.Default) {
+                    BasketballQuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
+                }
+                _uiState.update { it.copy(basketballState = BasketballUiState.Success(bundle)) }
+                _snackbarMessages.tryEmit("Última análise de Basquetebol restaurada.")
+            }
+            return
+        }
+
+        val cached = lastFetchResult ?: return
+        val snapshot = _uiState.value
+        viewModelScope.launch {
+            val bundle = withContext(Dispatchers.Default) {
+                QuantEngine.buildAnalysisBundle(cached, snapshot.stakeMode, snapshot.budgetAmount)
+            }
+            _uiState.update { it.copy(analysisState = AnalysisUiState.Success(bundle)) }
+            _snackbarMessages.tryEmit("Última análise de Futebol restaurada.")
+        }
+    }
+
     fun analyzeAndGenerateSlips() {
+        if (_uiState.value.sportMode == SportMode.BASKETBALL) {
+            analyzeBasketballPipeline()
+        } else {
+            analyzeFootballPipeline()
+        }
+    }
+
+    private fun analyzeFootballPipeline() {
         if (_uiState.value.analysisState is AnalysisUiState.Analyzing) return
 
         viewModelScope.launch {
             try {
-                // Step 1: Lock selected Portugal Continental WET/WEST cycle & dates
                 val selectedDates = _uiState.value.selectedDatesIso
                 val cycleInfo = QuantEngine.buildCycleInfoForDates(selectedDates)
                 _uiState.update {
@@ -218,12 +360,11 @@ class BetViewModel(
                     )
                 }
 
-                // Step 2: Gemini + Google Search Grounding (Flashscore, ZeroZero, FBref, Transfermarkt, Betclic.pt)
                 _uiState.update {
                     it.copy(
                         analysisState = AnalysisUiState.Analyzing(
                             stepIndex = 2,
-                            stepLabel = "Passo 2/4 • Google Search Grounding (Flashscore, FBref, Transfermarkt, OddsPortal)…"
+                            stepLabel = "Passo 2/4 • A consultar jogos oficiais de Futebol nos dias selecionados…"
                         )
                     )
                 }
@@ -244,7 +385,12 @@ class BetViewModel(
                 }
                 lastFetchResult = fetched
 
-                // Step 3: Local Mathematical Engine (Poisson 12x12, Dixon-Coles, Elo, +EV, 1/4 Kelly)
+                cacheStore?.let { store ->
+                    withContext(Dispatchers.IO) {
+                        runCatching { store.saveLatestAnalysis(fetched) }
+                    }
+                }
+
                 _uiState.update {
                     it.copy(
                         analysisState = AnalysisUiState.Analyzing(
@@ -254,7 +400,6 @@ class BetViewModel(
                     )
                 }
 
-                // Step 4: 3 Slips + Correlated 100,000-iteration Monte Carlo simulation
                 _uiState.update {
                     it.copy(
                         analysisState = AnalysisUiState.Analyzing(
@@ -282,11 +427,110 @@ class BetViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Pipeline execution failed", e)
+                Log.e(TAG, "Football pipeline failed", e)
                 _uiState.update {
                     it.copy(
                         analysisState = AnalysisUiState.Error(
-                            e.message ?: "Erro ao executar o pipeline quantitativo."
+                            message = e.message ?: "Erro ao executar o pipeline de Futebol.",
+                            canRestoreCached = lastFetchResult != null
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun analyzeBasketballPipeline() {
+        if (_uiState.value.basketballState is BasketballUiState.Analyzing) return
+
+        viewModelScope.launch {
+            try {
+                val selectedDates = _uiState.value.selectedDatesIso
+                val cycleInfo = QuantEngine.buildCycleInfoForDates(selectedDates)
+                _uiState.update {
+                    it.copy(
+                        cycleInfo = cycleInfo,
+                        savedBasketballSlipKeys = emptySet(),
+                        basketballState = BasketballUiState.Analyzing(
+                            stepIndex = 1,
+                            stepLabel = "Passo 1/4 • Basquetebol: ${cycleInfo.startDateIso} a ${cycleInfo.endDateIso} (${cycleInfo.timezoneLabel})…"
+                        )
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        basketballState = BasketballUiState.Analyzing(
+                            stepIndex = 2,
+                            stepLabel = "Passo 2/4 • A consultar jogos oficiais NBA/NCAA, médias PPG e linhas…"
+                        )
+                    )
+                }
+                val fetched = withContext(Dispatchers.IO) {
+                    basketballRepository.fetchBasketballMatches(
+                        cycleInfo = cycleInfo,
+                        onStageUpdate = { stageMsg ->
+                            _uiState.update { state ->
+                                state.copy(
+                                    basketballState = BasketballUiState.Analyzing(
+                                        stepIndex = 2,
+                                        stepLabel = stageMsg
+                                    )
+                                )
+                            }
+                        }
+                    )
+                }
+                lastBasketballFetchResult = fetched
+
+                cacheStore?.let { store ->
+                    withContext(Dispatchers.IO) {
+                        runCatching { store.saveLatestBasketballAnalysis(fetched) }
+                    }
+                }
+
+                _uiState.update {
+                    it.copy(
+                        basketballState = BasketballUiState.Analyzing(
+                            stepIndex = 3,
+                            stepLabel = "Passo 3/4 • A projetar pontos Q1–Q4, Handicap, Over/Under e Edge para ${fetched.matches.size} jogos…"
+                        )
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        basketballState = BasketballUiState.Analyzing(
+                            stepIndex = 4,
+                            stepLabel = "Passo 4/4 • A simular 100.000 cenários por quartos (Q1–Q4 + Prol.) em Monte Carlo…"
+                        )
+                    )
+                }
+                val stateSnapshot = _uiState.value
+                val bundle = withContext(Dispatchers.Default) {
+                    BasketballQuantEngine.buildAnalysisBundle(
+                        fetchResult = fetched,
+                        stakeMode = stateSnapshot.stakeMode,
+                        totalBudget = stateSnapshot.budgetAmount
+                    )
+                }
+
+                _uiState.update {
+                    it.copy(
+                        cycleInfo = fetched.cycleInfo,
+                        selectedBasketballMatchIndex = 0,
+                        basketballState = BasketballUiState.Success(bundle)
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Basketball pipeline failed", e)
+                _uiState.update {
+                    it.copy(
+                        basketballState = BasketballUiState.Error(
+                            message = e.message ?: "Erro ao executar o pipeline de Basquetebol.",
+                            canRestoreCached = lastBasketballFetchResult != null
                         )
                     )
                 }
@@ -295,17 +539,23 @@ class BetViewModel(
     }
 
     private fun recalculateLocallyIfReady() {
-        val fetched = lastFetchResult ?: return
         val snapshot = _uiState.value
+        val fetchedFootball = lastFetchResult
+        val fetchedBasket = lastBasketballFetchResult
+
         viewModelScope.launch {
-            val recomputed = withContext(Dispatchers.Default) {
-                QuantEngine.buildAnalysisBundle(
-                    fetchResult = fetched,
-                    stakeMode = snapshot.stakeMode,
-                    totalBudget = snapshot.budgetAmount
-                )
+            if (fetchedFootball != null) {
+                val recomputed = withContext(Dispatchers.Default) {
+                    QuantEngine.buildAnalysisBundle(fetchedFootball, snapshot.stakeMode, snapshot.budgetAmount)
+                }
+                _uiState.update { it.copy(analysisState = AnalysisUiState.Success(recomputed)) }
             }
-            _uiState.update { it.copy(analysisState = AnalysisUiState.Success(recomputed)) }
+            if (fetchedBasket != null) {
+                val recomputedBk = withContext(Dispatchers.Default) {
+                    BasketballQuantEngine.buildAnalysisBundle(fetchedBasket, snapshot.stakeMode, snapshot.budgetAmount)
+                }
+                _uiState.update { it.copy(basketballState = BasketballUiState.Success(recomputedBk)) }
+            }
         }
     }
 
@@ -333,10 +583,72 @@ class BetViewModel(
                 m
             }
         }
-        lastFetchResult = current.copy(matches = updatedMatches)
+        val updatedFetch = current.copy(matches = updatedMatches)
+        lastFetchResult = updatedFetch
         _uiState.update { it.copy(savedSlipKeys = emptySet()) }
+
+        cacheStore?.let { store ->
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { store.saveLatestAnalysis(updatedFetch) }
+            }
+        }
+
         recalculateLocallyIfReady()
-        _snackbarMessages.tryEmit("Odds Betclic.pt atualizadas • Boletins e Monte Carlo recalculados.")
+        _snackbarMessages.tryEmit("Odds Betclic.pt guardadas • Boletins e Monte Carlo recalculados.")
+    }
+
+    fun updateBasketballLinesAndOdds(
+        matchId: String,
+        totalLine: Double,
+        homeSpreadLine: Double,
+        q1TotalLine: Double,
+        oddHomeMl: Double,
+        oddAwayMl: Double,
+        oddHomeSpread: Double,
+        oddAwaySpread: Double,
+        oddTotalOver: Double,
+        oddTotalUnder: Double,
+        oddQ1Over: Double,
+        oddQ1Under: Double
+    ) {
+        val current = lastBasketballFetchResult ?: return
+        val updatedMatches = current.matches.map { m ->
+            if (m.id == matchId) {
+                val safeTotal = totalLine.coerceIn(100.0, 290.0)
+                val safeQ1 = q1TotalLine.coerceIn(20.0, 85.0)
+                val safeCushion = if (m.isNbaFormat) 6.5 else 5.5
+                m.copy(
+                    totalLine = safeTotal,
+                    homeSpreadLine = homeSpreadLine.coerceIn(-40.0, 40.0),
+                    q1TotalLine = safeQ1,
+                    htTotalLine = BasketballQuantEngine.roundHalf(safeTotal * 0.505),
+                    homeTeamTotalLine = BasketballQuantEngine.roundHalf((safeTotal - homeSpreadLine) / 2.0),
+                    altSafeTotalLine = BasketballQuantEngine.roundHalf(safeTotal - safeCushion),
+                    oddHomeMl = oddHomeMl.coerceAtLeast(1.02),
+                    oddAwayMl = oddAwayMl.coerceAtLeast(1.02),
+                    oddHomeSpread = oddHomeSpread.coerceAtLeast(1.02),
+                    oddAwaySpread = oddAwaySpread.coerceAtLeast(1.02),
+                    oddTotalOver = oddTotalOver.coerceAtLeast(1.02),
+                    oddTotalUnder = oddTotalUnder.coerceAtLeast(1.02),
+                    oddQ1Over = oddQ1Over.coerceAtLeast(1.02),
+                    oddQ1Under = oddQ1Under.coerceAtLeast(1.02)
+                )
+            } else {
+                m
+            }
+        }
+        val updatedFetch = current.copy(matches = updatedMatches)
+        lastBasketballFetchResult = updatedFetch
+        _uiState.update { it.copy(savedBasketballSlipKeys = emptySet()) }
+
+        cacheStore?.let { store ->
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { store.saveLatestBasketballAnalysis(updatedFetch) }
+            }
+        }
+
+        recalculateLocallyIfReady()
+        _snackbarMessages.tryEmit("Linhas e odds Betclic Basquetebol guardadas e recalculadas.")
     }
 
     fun saveSlipToHistory(slip: GeneratedSlip) {
@@ -360,7 +672,32 @@ class BetViewModel(
         viewModelScope.launch {
             historyRepository.saveGeneratedSlips(slips, cycleLabel)
             _uiState.update { it.copy(savedSlipKeys = it.savedSlipKeys + keys) }
-            _snackbarMessages.tryEmit("Os 3 boletins foram registados no histórico local.")
+            _snackbarMessages.tryEmit("Os 3 boletins de Futebol foram registados no histórico.")
+        }
+    }
+
+    fun saveBasketballSlipToHistory(slip: BasketballSlip) {
+        val cycleLabel = "BASKET • ${_uiState.value.cycleInfo.startDateIso}"
+        val key = "${slip.type.code}_${slip.isFullLeverageVariant}"
+        viewModelScope.launch {
+            historyRepository.saveBasketballSlip(slip, cycleLabel)
+            _uiState.update { it.copy(savedBasketballSlipKeys = it.savedBasketballSlipKeys + key) }
+            _snackbarMessages.tryEmit("${slip.title} guardado no histórico Room.")
+        }
+    }
+
+    fun saveAllActiveBasketballSlips() {
+        val success = _uiState.value.basketballState as? BasketballUiState.Success ?: return
+        val bundle = success.bundle
+        val activeSlip3 = if (_uiState.value.useFullLeverageSlip3) bundle.slip3Full else bundle.slip3Base
+        val slips = listOf(bundle.slip1, bundle.slip2, activeSlip3)
+        val cycleLabel = "BASKET • ${bundle.cycleInfo.startDateIso}"
+        val keys = slips.map { "${it.type.code}_${it.isFullLeverageVariant}" }.toSet()
+
+        viewModelScope.launch {
+            historyRepository.saveBasketballSlips(slips, cycleLabel)
+            _uiState.update { it.copy(savedBasketballSlipKeys = it.savedBasketballSlipKeys + keys) }
+            _snackbarMessages.tryEmit("Os 3 boletins de Basquetebol foram registados no histórico.")
         }
     }
 
@@ -380,11 +717,13 @@ class BetViewModel(
 
     class Factory(
         private val geminiRepository: GeminiRepository,
-        private val historyRepository: BetHistoryRepository
+        private val basketballRepository: BasketballRepository = BasketballRepository(),
+        private val historyRepository: BetHistoryRepository,
+        private val cacheStore: AnalysisCacheStore? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return BetViewModel(geminiRepository, historyRepository) as T
+            return BetViewModel(geminiRepository, basketballRepository, historyRepository, cacheStore) as T
         }
     }
 }

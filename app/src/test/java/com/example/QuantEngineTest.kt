@@ -164,4 +164,101 @@ class QuantEngineTest {
         assertEquals("2026-11-22", weekendCycle.endDateIso)
         assertEquals(weekendDates, weekendCycle.exactDatesIso)
     }
+
+    @Test
+    fun espnDateParsing_and_cacheStoreRoundTrip_workReliably() {
+        val espn = com.example.data.EspnLiveDataSource()
+        assertEquals("20261120", espn.isoToCompactDate("2026-11-20"))
+        assertTrue(espn.parseUtcDate("2026-11-24T20:00Z") != null)
+        assertTrue(espn.parseUtcDate("2026-11-21T15:00:00Z") != null)
+        assertTrue(espn.parseUtcDate("2026-11-21T15:00:00.000Z") != null)
+
+        val cycle = QuantEngine.buildCycleInfoForDates(listOf("2026-11-20", "2026-11-21", "2026-11-22"))
+        val original = GroundedFetchResult(
+            cycleInfo = cycle,
+            matches = listOf(
+                RawMatchData("m1", "21/11 18:00 WET", "Liga Portugal Betclic", "Sporting CP", "SC Braga", 2.05, 0.95, "Forma forte", 1780.0, 1660.0, 1.55, 4.20, 5.50, 1.72, 1.44, 1.75),
+                RawMatchData("m2", "22/11 20:30 WET", "Liga Portugal Betclic", "SL Benfica", "FC Porto", 1.70, 1.20, "Clássico", 1790.0, 1760.0, 2.05, 3.40, 3.60, 1.85, 1.35, 1.72)
+            ),
+            sources = listOf(com.example.quant.GroundingSource("ESPN • Liga Portugal", "https://www.espn.com/soccer/scoreboard/_/league/por.1")),
+            searchQueries = listOf("ESPN Live Scoreboard API"),
+            modelSummaryNote = "Teste cache local"
+        )
+        val json = com.example.data.AnalysisCacheStore.serializeFetchResult(original)
+        val restored = com.example.data.AnalysisCacheStore.deserializeFetchResult(json)
+        assertTrue(restored != null)
+        assertEquals(2, restored!!.matches.size)
+        assertEquals("Sporting CP", restored.matches[0].equipaCasa)
+        assertEquals(1.55, restored.matches[0].odd1, 1e-6)
+        assertEquals(listOf("2026-11-20", "2026-11-21", "2026-11-22"), restored.cycleInfo.exactDatesIso)
+    }
+
+    @Test
+    fun basketballQuantEngine_quartersMonteCarloAndCache_workAccurately() {
+        val sampleBasket = listOf(
+            com.example.quant.RawBasketballMatchData(
+                id = "nba1", dataHoraWet = "21/11 00:30 WET", competicao = "NBA",
+                equipaCasa = "Boston Celtics", equipaFora = "New York Knicks",
+                expectedPtsHome = 118.4, expectedPtsAway = 110.6, paceNotes = "Ritmo alto",
+                homeWinRate = 0.72, awayWinRate = 0.58, isNbaFormat = true,
+                totalLine = 224.5, homeSpreadLine = -5.5, q1TotalLine = 56.5, htTotalLine = 113.5,
+                homeTeamTotalLine = 115.5, altSafeTotalLine = 218.5,
+                oddHomeMl = 1.48, oddAwayMl = 2.75, oddHomeSpread = 1.90, oddAwaySpread = 1.88,
+                oddTotalOver = 1.90, oddTotalUnder = 1.88, oddQ1Over = 1.88, oddQ1Under = 1.88,
+                oddHtOver = 1.87, oddHomeTeamOver = 1.88, oddAltSafeOver = 1.42
+            ),
+            com.example.quant.RawBasketballMatchData(
+                id = "nba2", dataHoraWet = "21/11 03:00 WET", competicao = "NBA",
+                equipaCasa = "Los Angeles Lakers", equipaFora = "Denver Nuggets",
+                expectedPtsHome = 114.2, expectedPtsAway = 115.8, paceNotes = "Equilibrado",
+                homeWinRate = 0.56, awayWinRate = 0.61, isNbaFormat = true,
+                totalLine = 228.5, homeSpreadLine = 1.5, q1TotalLine = 57.5, htTotalLine = 115.5,
+                homeTeamTotalLine = 113.5, altSafeTotalLine = 222.5,
+                oddHomeMl = 2.05, oddAwayMl = 1.80, oddHomeSpread = 1.88, oddAwaySpread = 1.90,
+                oddTotalOver = 1.88, oddTotalUnder = 1.88, oddQ1Over = 1.87, oddQ1Under = 1.87,
+                oddHtOver = 1.87, oddHomeTeamOver = 1.86, oddAltSafeOver = 1.40
+            ),
+            com.example.quant.RawBasketballMatchData(
+                id = "nba3", dataHoraWet = "21/11 01:00 WET", competicao = "NBA",
+                equipaCasa = "Oklahoma City Thunder", equipaFora = "Golden State Warriors",
+                expectedPtsHome = 120.5, expectedPtsAway = 112.0, paceNotes = "Ataque rápido",
+                homeWinRate = 0.78, awayWinRate = 0.55, isNbaFormat = true,
+                totalLine = 229.5, homeSpreadLine = -6.5, q1TotalLine = 57.5, htTotalLine = 115.5,
+                homeTeamTotalLine = 118.5, altSafeTotalLine = 223.5,
+                oddHomeMl = 1.40, oddAwayMl = 3.05, oddHomeSpread = 1.90, oddAwaySpread = 1.88,
+                oddTotalOver = 1.88, oddTotalUnder = 1.88, oddQ1Over = 1.87, oddQ1Under = 1.87,
+                oddHtOver = 1.87, oddHomeTeamOver = 1.86, oddAltSafeOver = 1.40
+            )
+        )
+
+        val cycle = QuantEngine.buildCycleInfoForDates(listOf("2026-11-21"))
+        val fetch = com.example.quant.BasketballFetchResult(
+            cycleInfo = cycle,
+            matches = sampleBasket,
+            sources = emptyList(),
+            searchQueries = listOf("ESPN Live Basketball API"),
+            modelSummaryNote = "Teste Basquetebol"
+        )
+
+        val bundle = com.example.quant.BasketballQuantEngine.buildAnalysisBundle(fetch, StakeMode.FREEBET, 5.0)
+        assertEquals(3, bundle.matches.size)
+        assertEquals(4, bundle.matches[0].quarters.size)
+        assertEquals(11, bundle.matches[0].markets.size)
+        assertTrue(bundle.matches[0].probHomeWin > 0.65)
+        assertEquals(100_000, bundle.monteCarloBase.iterations)
+        assertTrue(bundle.monteCarloBase.probAtLeastOneWin in 0.05..1.0)
+        assertTrue(bundle.monteCarloBase.expectedNetReturn > 0.0)
+
+        // Verify ESPN US timezone day expansion & Basketball JSON cache round-trip
+        val espnBk = com.example.data.EspnBasketballDataSource()
+        val expanded = espnBk.expandCompactDaysForUsTimezone(listOf("2026-11-21"))
+        assertEquals(listOf("20261120", "20261121"), expanded)
+
+        val json = com.example.data.AnalysisCacheStore.serializeBasketballFetchResult(fetch)
+        val restored = com.example.data.AnalysisCacheStore.deserializeBasketballFetchResult(json)
+        assertTrue(restored != null)
+        assertEquals(3, restored!!.matches.size)
+        assertEquals("Boston Celtics", restored.matches[0].equipaCasa)
+        assertEquals(56.5, restored.matches[0].q1TotalLine, 1e-6)
+    }
 }

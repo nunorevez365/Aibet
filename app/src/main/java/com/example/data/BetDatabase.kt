@@ -10,6 +10,9 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.quant.BasketballSlip
 import com.example.quant.BetStatus
 import com.example.quant.GeneratedSlip
 import com.example.quant.RoiSummary
@@ -34,6 +37,17 @@ data class BetSlipEntity(
     val netProfit: Double = 0.0
 )
 
+@Entity(tableName = "cached_analysis")
+data class CachedAnalysisEntity(
+    @PrimaryKey val id: Int = 1,
+    val updatedAtMillis: Long,
+    val cycleCode: String,
+    val startDateIso: String,
+    val endDateIso: String,
+    val exactDatesCsv: String,
+    val payloadJson: String
+)
+
 @Dao
 interface BetSlipDao {
     @Query("SELECT * FROM bet_slips ORDER BY createdAtMillis DESC, id DESC")
@@ -55,17 +69,49 @@ interface BetSlipDao {
     suspend fun clearAll()
 }
 
+@Dao
+interface CachedAnalysisDao {
+    @Query("SELECT * FROM cached_analysis WHERE id = :slotId LIMIT 1")
+    suspend fun getBySlot(slotId: Int): CachedAnalysisEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: CachedAnalysisEntity)
+
+    @Query("DELETE FROM cached_analysis")
+    suspend fun clear()
+}
+
 @Database(
-    entities = [BetSlipEntity::class],
-    version = 1,
+    entities = [BetSlipEntity::class, CachedAnalysisEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class BetDatabase : RoomDatabase() {
     abstract fun betSlipDao(): BetSlipDao
+    abstract fun cachedAnalysisDao(): CachedAnalysisDao
 
     companion object {
         @Volatile
         private var INSTANCE: BetDatabase? = null
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cached_analysis` (
+                        `id` INTEGER NOT NULL,
+                        `updatedAtMillis` INTEGER NOT NULL,
+                        `cycleCode` TEXT NOT NULL,
+                        `startDateIso` TEXT NOT NULL,
+                        `endDateIso` TEXT NOT NULL,
+                        `exactDatesCsv` TEXT NOT NULL,
+                        `payloadJson` TEXT NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         fun getInstance(context: Context): BetDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -73,7 +119,10 @@ abstract class BetDatabase : RoomDatabase() {
                     context.applicationContext,
                     BetDatabase::class.java,
                     "betquant_ai.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }
@@ -88,6 +137,14 @@ class BetHistoryRepository(private val dao: BetSlipDao) {
     }
 
     suspend fun saveGeneratedSlips(slips: List<GeneratedSlip>, cycleLabel: String) {
+        dao.insertSlips(slips.map { it.toEntity(cycleLabel) })
+    }
+
+    suspend fun saveBasketballSlip(slip: BasketballSlip, cycleLabel: String): Long {
+        return dao.insertSlip(slip.toEntity(cycleLabel))
+    }
+
+    suspend fun saveBasketballSlips(slips: List<BasketballSlip>, cycleLabel: String) {
         dao.insertSlips(slips.map { it.toEntity(cycleLabel) })
     }
 
@@ -166,6 +223,32 @@ private fun GeneratedSlip.toEntity(cycleLabel: String): BetSlipEntity {
     return BetSlipEntity(
         cycleLabel = cycleLabel,
         slipCategory = type.code,
+        title = title,
+        selectionsSummary = summary,
+        combinedOdd = combinedOdd,
+        stake = stake,
+        isFreebet = stakeMode == StakeMode.FREEBET,
+        expectedValue = expectedValue,
+        trueProbability = combinedTrueProb
+    )
+}
+
+private fun BasketballSlip.toEntity(cycleLabel: String): BetSlipEntity {
+    val summary = selections.joinToString("\n") { leg ->
+        val edgeSign = if (leg.edge >= 0) "+" else ""
+        String.format(
+            Locale.US,
+            "%s • %s @ %.2f (Edge %s%.1f%%)",
+            leg.matchLabel,
+            leg.lineLabel,
+            leg.odd,
+            edgeSign,
+            leg.edge * 100.0
+        )
+    }
+    return BetSlipEntity(
+        cycleLabel = "🏀 $cycleLabel",
+        slipCategory = "BASKET_${type.code}",
         title = title,
         selectionsSummary = summary,
         combinedOdd = combinedOdd,

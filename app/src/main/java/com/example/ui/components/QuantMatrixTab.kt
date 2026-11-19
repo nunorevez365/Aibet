@@ -59,6 +59,7 @@ import com.example.R
 import com.example.quant.MarketEvaluation
 import com.example.quant.MatchQuantAnalysis
 import com.example.quant.QuantEngine
+import com.example.quant.SportMode
 import com.example.ui.AnalysisUiState
 import com.example.ui.BetUiState
 import com.example.ui.QuantFormatters
@@ -67,14 +68,39 @@ import com.example.ui.theme.MonoFontFamily
 @Composable
 fun QuantMatrixTab(
     uiState: BetUiState,
+    onSelectSport: (SportMode) -> Unit,
     onSelectMatch: (Int) -> Unit,
+    onSelectBasketballMatch: (Int) -> Unit,
     onToggleFullMatrix: () -> Unit,
     onUpdateMatchOdds: (String, Double, Double, Double, Double, Double, Double) -> Unit,
+    onUpdateBasketballOdds: (String, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double, Double) -> Unit,
     onNavigateToAnalyze: () -> Unit
 ) {
+    if (uiState.sportMode == SportMode.BASKETBALL) {
+        BasketballMatrixContent(
+            uiState = uiState,
+            onSelectSport = onSelectSport,
+            onSelectMatch = onSelectBasketballMatch,
+            onUpdateLinesAndOdds = onUpdateBasketballOdds,
+            onNavigateToAnalyze = onNavigateToAnalyze
+        )
+        return
+    }
+
     val successState = uiState.analysisState as? AnalysisUiState.Success
     if (successState == null || successState.bundle.matches.isEmpty()) {
-        EmptyMatrixState(onNavigateToAnalyze = onNavigateToAnalyze)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item(key = "matrix_sport_toggle_empty") {
+                SportModeSelectorRow(sportMode = uiState.sportMode, onSelectSport = onSelectSport)
+            }
+            item(key = "matrix_empty_state") {
+                EmptyMatrixState(onNavigateToAnalyze = onNavigateToAnalyze)
+            }
+        }
         return
     }
 
@@ -99,6 +125,10 @@ fun QuantMatrixTab(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item(key = "matrix_sport_toggle") {
+            SportModeSelectorRow(sportMode = uiState.sportMode, onSelectSport = onSelectSport)
+        }
+
         item(key = "match_selector") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
