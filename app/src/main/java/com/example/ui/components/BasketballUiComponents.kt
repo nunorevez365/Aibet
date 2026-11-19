@@ -19,8 +19,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
@@ -35,11 +38,13 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -512,6 +517,13 @@ fun BasketballMatrixContent(
     val safeIndex = uiState.selectedBasketballMatchIndex.coerceIn(0, matches.lastIndex)
     val selectedMatch = matches[safeIndex]
     var showOddsDialog by remember(selectedMatch.rawMatch.id) { mutableStateOf(false) }
+    val chipRowState = rememberLazyListState()
+
+    LaunchedEffect(safeIndex, matches.size) {
+        if (matches.isNotEmpty()) {
+            chipRowState.animateScrollToItem(safeIndex)
+        }
+    }
 
     if (showOddsDialog) {
         EditBasketballOddsDialog(
@@ -538,28 +550,87 @@ fun BasketballMatrixContent(
 
         item(key = "basket_match_selector") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Projeção Basquetebol (${matches.size} jogos)",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Projeção Basquetebol",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Jogo ${safeIndex + 1} de ${matches.size} • toca num jogo para alternar",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { if (safeIndex > 0) onSelectMatch(safeIndex - 1) },
+                            enabled = safeIndex > 0,
+                            modifier = Modifier.testTag("basket_prev_match")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                contentDescription = "Jogo anterior"
+                            )
+                        }
+                        IconButton(
+                            onClick = { if (safeIndex < matches.lastIndex) onSelectMatch(safeIndex + 1) },
+                            enabled = safeIndex < matches.lastIndex,
+                            modifier = Modifier.testTag("basket_next_match")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Próximo jogo"
+                            )
+                        }
+                    }
+                }
+                LazyRow(
+                    state = chipRowState,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     itemsIndexed(matches) { idx, match ->
+                        val isSelected = idx == safeIndex
+                        val homeShort = shortTeamLabel(match.rawMatch.equipaCasa)
+                        val awayShort = shortTeamLabel(match.rawMatch.equipaFora)
                         FilterChip(
-                            selected = idx == safeIndex,
+                            selected = isSelected,
                             onClick = { onSelectMatch(idx) },
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .testTag("basket_matrix_chip_$idx"),
+                            leadingIcon = if (isSelected) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                             label = {
                                 Text(
-                                    text = "${match.rawMatch.equipaCasa} vs ${match.rawMatch.equipaFora}",
-                                    maxLines = 1
+                                    text = "${idx + 1}. $homeShort vs $awayShort",
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.tertiary
+                                selectedLabelColor = MaterialTheme.colorScheme.tertiary,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.tertiary
                             )
                         )
                     }
@@ -635,7 +706,7 @@ private fun BasketballIntelCard(match: BasketballMatchAnalysis) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 BasketKpiTile(
-                    label = "Total Projetado",
+                    label = "Total Pts",
                     value = String.format(Locale.US, "%.1f", match.projectedCombinedTotal),
                     accent = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.weight(1f)
@@ -1013,3 +1084,12 @@ private fun BasketballMarketTableCard(
         }
     }
 }
+
+private fun shortTeamLabel(fullName: String): String {
+    val trimmed = fullName.trim()
+    if (trimmed.length <= 12) return trimmed
+    val parts = trimmed.split(" ").filter { it.isNotBlank() }
+    val nickname = parts.lastOrNull() ?: trimmed
+    return if (nickname.length >= 4) nickname else trimmed.take(12)
+}
+

@@ -18,10 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.MedicalServices
@@ -34,6 +38,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +114,13 @@ fun QuantMatrixTab(
     val safeIndex = uiState.selectedMatchIndex.coerceIn(0, matches.lastIndex)
     val selectedMatch = matches[safeIndex]
     var showOddsDialog by remember(selectedMatch.rawMatch.id) { mutableStateOf(false) }
+    val chipRowState = rememberLazyListState()
+
+    LaunchedEffect(safeIndex, matches.size) {
+        if (matches.isNotEmpty()) {
+            chipRowState.animateScrollToItem(safeIndex)
+        }
+    }
 
     if (showOddsDialog) {
         EditBetclicOddsDialog(
@@ -131,12 +144,54 @@ fun QuantMatrixTab(
 
         item(key = "match_selector") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Matriz Quantitativa (${matches.size} jogos)",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Matriz Quantitativa",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Jogo ${safeIndex + 1} de ${matches.size} • toca num jogo para alternar",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { if (safeIndex > 0) onSelectMatch(safeIndex - 1) },
+                            enabled = safeIndex > 0,
+                            modifier = Modifier.testTag("football_prev_match")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                contentDescription = "Jogo anterior"
+                            )
+                        }
+                        IconButton(
+                            onClick = { if (safeIndex < matches.lastIndex) onSelectMatch(safeIndex + 1) },
+                            enabled = safeIndex < matches.lastIndex,
+                            modifier = Modifier.testTag("football_next_match")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Próximo jogo"
+                            )
+                        }
+                    }
+                }
+                LazyRow(
+                    state = chipRowState,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     itemsIndexed(matches) { index, match ->
                         val isSelected = index == safeIndex
                         FilterChip(
@@ -145,15 +200,29 @@ fun QuantMatrixTab(
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
                                 .testTag("matrix_match_chip_$index"),
+                            leadingIcon = if (isSelected) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                             label = {
                                 Text(
-                                    text = "${match.rawMatch.equipaCasa} vs ${match.rawMatch.equipaFora}",
-                                    maxLines = 1
+                                    text = "${index + 1}. ${match.rawMatch.equipaCasa} vs ${match.rawMatch.equipaFora}",
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.secondary
+                                selectedLabelColor = MaterialTheme.colorScheme.secondary,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.secondary
                             )
                         )
                     }

@@ -103,16 +103,16 @@ object BasketballQuantEngine {
         val spreadSignAway = if (awayLine >= 0) "+${formatHalf(awayLine)}" else formatHalf(awayLine)
 
         val markets = listOf(
-            evaluateMarket(raw, matchLabel, BasketballMarketType.HOME_ML, "Casa (${raw.equipaCasa.take(12)})", 0.0, raw.oddHomeMl, probHomeWin),
-            evaluateMarket(raw, matchLabel, BasketballMarketType.AWAY_ML, "Fora (${raw.equipaFora.take(12)})", 0.0, raw.oddAwayMl, probAwayWin),
-            evaluateMarket(raw, matchLabel, BasketballMarketType.HOME_SPREAD, "Casa $spreadSignHome", raw.homeSpreadLine, raw.oddHomeSpread, probHomeSpread),
-            evaluateMarket(raw, matchLabel, BasketballMarketType.AWAY_SPREAD, "Fora $spreadSignAway", awayLine, raw.oddAwaySpread, probAwaySpread),
+            evaluateMarket(raw, matchLabel, BasketballMarketType.HOME_ML, "ML Casa (${raw.equipaCasa.take(10)})", 0.0, raw.oddHomeMl, probHomeWin),
+            evaluateMarket(raw, matchLabel, BasketballMarketType.AWAY_ML, "ML Fora (${raw.equipaFora.take(10)})", 0.0, raw.oddAwayMl, probAwayWin),
+            evaluateMarket(raw, matchLabel, BasketballMarketType.HOME_SPREAD, "HC Casa $spreadSignHome", raw.homeSpreadLine, raw.oddHomeSpread, probHomeSpread),
+            evaluateMarket(raw, matchLabel, BasketballMarketType.AWAY_SPREAD, "HC Fora $spreadSignAway", awayLine, raw.oddAwaySpread, probAwaySpread),
             evaluateMarket(raw, matchLabel, BasketballMarketType.TOTAL_OVER, "Mais ${formatHalf(raw.totalLine)} pts", raw.totalLine, raw.oddTotalOver, probTotalOver),
             evaluateMarket(raw, matchLabel, BasketballMarketType.TOTAL_UNDER, "Menos ${formatHalf(raw.totalLine)} pts", raw.totalLine, raw.oddTotalUnder, probTotalUnder),
             evaluateMarket(raw, matchLabel, BasketballMarketType.Q1_OVER, "Q1 Mais ${formatHalf(raw.q1TotalLine)}", raw.q1TotalLine, raw.oddQ1Over, probQ1Over),
             evaluateMarket(raw, matchLabel, BasketballMarketType.Q1_UNDER, "Q1 Menos ${formatHalf(raw.q1TotalLine)}", raw.q1TotalLine, raw.oddQ1Under, probQ1Under),
             evaluateMarket(raw, matchLabel, BasketballMarketType.HT_OVER, "1ªP Mais ${formatHalf(raw.htTotalLine)}", raw.htTotalLine, raw.oddHtOver, probHtOver),
-            evaluateMarket(raw, matchLabel, BasketballMarketType.HOME_TEAM_OVER, "Casa +${formatHalf(raw.homeTeamTotalLine)} pts", raw.homeTeamTotalLine, raw.oddHomeTeamOver, probHomeTeamOver),
+            evaluateMarket(raw, matchLabel, BasketballMarketType.HOME_TEAM_OVER, "Casa Mais ${formatHalf(raw.homeTeamTotalLine)} pts", raw.homeTeamTotalLine, raw.oddHomeTeamOver, probHomeTeamOver),
             evaluateMarket(raw, matchLabel, BasketballMarketType.ALT_TOTAL_SAFE, "Alt. Mais ${formatHalf(raw.altSafeTotalLine)}", raw.altSafeTotalLine, raw.oddAltSafeOver, probAltSafeOver)
         )
 
