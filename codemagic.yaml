@@ -2,7 +2,7 @@ workflows:
   betquant-android-apk:
     name: BetQuant AI Android APK
     max_build_duration: 30
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     environment:
       java: 21
     scripts:
@@ -10,19 +10,24 @@ workflows:
         script: |
           SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           echo "sdk.dir=$SDK_DIR" > "$CM_BUILD_DIR/local.properties"
-          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          if [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          else
+            yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          fi
 
       - name: Install Gradle 9.3.1
         script: |
           curl -fsSL https://services.gradle.org/distributions/gradle-9.3.1-bin.zip -o /tmp/gradle-9.3.1.zip
-          unzip -q /tmp/gradle-9.3.1.zip -d /tmp
+          unzip -qo /tmp/gradle-9.3.1.zip -d /tmp
           /tmp/gradle-9.3.1/bin/gradle --version
 
       - name: Ensure debug keystore exists on runner
         script: |
           if [ -f debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
-          elif [ ! -f debug.keystore ]; then
+            (base64 -d debug.keystore.base64 > debug.keystore 2>/dev/null || base64 -D -i debug.keystore.base64 -o debug.keystore)
+          fi
+          if [ ! -f debug.keystore ]; then
             keytool -genkeypair -v \
               -keystore debug.keystore \
               -storepass android \
