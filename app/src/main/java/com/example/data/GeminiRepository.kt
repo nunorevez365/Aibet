@@ -71,9 +71,9 @@ class GeminiRepository(
         val espnPayload = espnDataSource.fetchConfirmedMatches(cycleInfo)
 
         if (espnPayload.matches.size < 2) {
-            val detail = espnPayload.diagnosticError?.let { " ($it)" }.orEmpty()
+            val detail = espnPayload.diagnosticError ?: "Poucos jogos oficiais nos dias selecionados."
             throw IllegalStateException(
-                "Não foi possível obter jogos oficiais agendados na ESPN$detail. Verifica a ligação à Internet e tenta novamente."
+                "$detail Seleciona o ciclo Sex–Dom, Seg–Qui ou marca mais dias no seletor acima."
             )
         }
 

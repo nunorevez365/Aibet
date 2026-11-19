@@ -94,6 +94,134 @@ object QuantEngine {
     }
 
     /**
+     * Generates the next [dayCount] calendar days in Portugal Continental (Europe/Lisbon)
+     * so the user can pick exact days or switch cleanly between Fri-Sun and Mon-Thu cycles.
+     */
+    fun buildSelectableDays(
+        nowMillis: Long = System.currentTimeMillis(),
+        dayCount: Int = 8
+    ): List<SelectableDay> {
+        val lisbonTz = TimeZone.getTimeZone("Europe/Lisbon")
+        val isoFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = lisbonTz }
+        val dmFmt = SimpleDateFormat("dd/MM", Locale("pt", "PT")).apply { timeZone = lisbonTz }
+
+        val cursor = Calendar.getInstance(lisbonTz).apply { timeInMillis = nowMillis }
+        val list = mutableListOf<SelectableDay>()
+        for (i in 0 until dayCount) {
+            if (i > 0) cursor.add(Calendar.DAY_OF_MONTH, 1)
+            val dow = cursor.get(Calendar.DAY_OF_WEEK)
+            val weekday = when (dow) {
+                Calendar.MONDAY -> "Seg"
+                Calendar.TUESDAY -> "Ter"
+                Calendar.WEDNESDAY -> "Qua"
+                Calendar.THURSDAY -> "Qui"
+                Calendar.FRIDAY -> "Sex"
+                Calendar.SATURDAY -> "Sáb"
+                else -> "Dom"
+            }
+            val isWeekend = dow == Calendar.FRIDAY || dow == Calendar.SATURDAY || dow == Calendar.SUNDAY
+            list.add(
+                SelectableDay(
+                    isoDate = isoFmt.format(cursor.time),
+                    shortWeekday = weekday,
+                    dayMonth = dmFmt.format(cursor.time),
+                    isWeekend = isWeekend
+                )
+            )
+        }
+        return list
+    }
+
+    /**
+     * Computes exact ISO dates for quick cycle presets (Fri-Sun weekend, Mon-Thu midweek, or Today).
+     */
+    fun getDatesForPreset(
+        preset: CyclePreset,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<String> {
+        val days = buildSelectableDays(nowMillis, dayCount = 10)
+        return when (preset) {
+            CyclePreset.TODAY -> listOf(days.first().isoDate)
+            CyclePreset.WEEKEND_FRI_SUN -> {
+                // Find the current or next contiguous Fri-Sat-Sun block
+                val firstWeekendIdx = days.indexOfFirst { it.isWeekend }.coerceAtLeast(0)
+                val block = mutableListOf<String>()
+                var idx = firstWeekendIdx
+                while (idx < days.size && days[idx].isWeekend) {
+                    block.add(days[idx].isoDate)
+                    idx++
+                }
+                block.ifEmpty { listOf(days.first().isoDate) }
+            }
+            CyclePreset.MIDWEEK_MON_THU -> {
+                // Find the current (if Mon-Wed) or next full Mon-Thu block (if Thu/Fri/Sat/Sun, pick next Mon-Thu unless Thu has games)
+                val firstDay = days.first()
+                val startSearchIdx = if (!firstDay.isWeekend && firstDay.shortWeekday != "Qui") {
+                    0
+                } else {
+                    // On Thursday or weekend, jump to the upcoming Monday-Thursday cycle
+                    days.indexOfFirst { it.shortWeekday == "Seg" }.takeIf { it >= 0 } ?: 0
+                }
+                val block = mutableListOf<String>()
+                var idx = startSearchIdx
+                while (idx < days.size && !days[idx].isWeekend) {
+                    block.add(days[idx].isoDate)
+                    idx++
+                }
+                block.ifEmpty { listOf(days.first().isoDate) }
+            }
+            CyclePreset.CUSTOM -> listOf(days.first().isoDate)
+        }
+    }
+
+    /**
+     * Builds a [TemporalCycleInfo] strictly bound to the user-selected ISO dates in Portugal WET/WEST.
+     */
+    fun buildCycleInfoForDates(
+        selectedDatesIso: Collection<String>,
+        nowMillis: Long = System.currentTimeMillis()
+    ): TemporalCycleInfo {
+        val sorted = selectedDatesIso.distinct().sorted()
+        if (sorted.isEmpty()) return detectCurrentPortugalCycle(nowMillis)
+
+        val lisbonTz = TimeZone.getTimeZone("Europe/Lisbon")
+        val calNow = Calendar.getInstance(lisbonTz).apply { timeInMillis = nowMillis }
+        val timeFmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "PT")).apply {
+            timeZone = lisbonTz
+        }
+        val tzLabel = if (lisbonTz.inDaylightTime(calNow.time)) "WEST (UTC+1)" else "WET (UTC+0)"
+
+        val isoFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = lisbonTz }
+        var weekendCount = 0
+        var midweekCount = 0
+        for (iso in sorted) {
+            val parsed = runCatching { isoFmt.parse(iso) }.getOrNull() ?: continue
+            val c = Calendar.getInstance(lisbonTz).apply { time = parsed }
+            val dow = c.get(Calendar.DAY_OF_WEEK)
+            if (dow == Calendar.FRIDAY || dow == Calendar.SATURDAY || dow == Calendar.SUNDAY) {
+                weekendCount++
+            } else {
+                midweekCount++
+            }
+        }
+
+        val cycle = if (weekendCount >= midweekCount) {
+            TemporalCycle.CYCLE_B_WEEKEND
+        } else {
+            TemporalCycle.CYCLE_A_MIDWEEK
+        }
+
+        return TemporalCycleInfo(
+            cycle = cycle,
+            currentTimeWet = timeFmt.format(calNow.time),
+            timezoneLabel = tzLabel,
+            startDateIso = sorted.first(),
+            endDateIso = sorted.last(),
+            exactDatesIso = sorted
+        )
+    }
+
+    /**
      * Step 3: Computes full match probabilities using Elo-adjusted lambdas + 12x12 Dixon-Coles matrix.
      */
     fun analyzeMatch(raw: RawMatchData): MatchQuantAnalysis {

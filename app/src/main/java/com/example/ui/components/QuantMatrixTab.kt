@@ -222,12 +222,18 @@ private fun MatchIntelCard(match: MatchQuantAnalysis) {
                 Text(
                     text = raw.competicao,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.secondary
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = raw.dataHoraWet,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
@@ -317,14 +323,18 @@ private fun IntelStatBox(
                 text = title,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = value,
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = MonoFontFamily,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = sub,
@@ -359,12 +369,11 @@ private fun DixonColesHeatmapCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = "Matriz Poisson + Dixon-Coles",
                         style = MaterialTheme.typography.titleMedium,
@@ -379,10 +388,16 @@ private fun DixonColesHeatmapCard(
                 OutlinedButton(
                     onClick = onToggleFullMatrix,
                     modifier = Modifier
+                        .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .testTag("toggle_matrix_size_button")
                 ) {
-                    Text(text = if (showFull12x12) "Foco 6×6" else "Ver 12×12")
+                    Text(
+                        text = if (showFull12x12) "Foco 6×6" else "Ver Matriz Completa 12×12",
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
@@ -509,13 +524,12 @@ private fun MarketValuationTableCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -533,6 +547,7 @@ private fun MarketValuationTableCard(
                 OutlinedButton(
                     onClick = onEditOddsClick,
                     modifier = Modifier
+                        .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .testTag("edit_betclic_odds_button")
                 ) {
@@ -541,8 +556,13 @@ private fun MarketValuationTableCard(
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "Odds Betclic")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Ajustar Odds Betclic.pt",
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
@@ -551,11 +571,11 @@ private fun MarketValuationTableCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Mercado", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1.3f))
-                Text("Odd", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.weight(0.75f))
-                Text("Real/Casa", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.weight(1.25f))
-                Text("Edge", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.weight(0.95f))
-                Text("1/4 Kelly", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, modifier = Modifier.weight(0.85f))
+                Text("Mercado", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1.25f))
+                Text("Odd", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, softWrap = false, modifier = Modifier.weight(0.75f))
+                Text("Real/Casa", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1.30f))
+                Text("Edge", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, softWrap = false, modifier = Modifier.weight(0.95f))
+                Text("Kelly", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, softWrap = false, modifier = Modifier.weight(0.85f))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -580,13 +600,17 @@ private fun MarketValuationTableCard(
                             text = eval.market.code,
                             style = MaterialTheme.typography.labelLarge,
                             color = if (isPositive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1.3f)
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1.25f)
                         )
                         Text(
                             text = QuantFormatters.odd(eval.odd),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.End,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.weight(0.75f)
                         )
                         Text(
@@ -594,7 +618,9 @@ private fun MarketValuationTableCard(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1.25f)
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.weight(1.30f)
                         )
                         Text(
                             text = QuantFormatters.signedPercentFraction(eval.edge),
@@ -602,6 +628,8 @@ private fun MarketValuationTableCard(
                             fontWeight = FontWeight.Bold,
                             color = if (isPositive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                             textAlign = TextAlign.End,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.weight(0.95f)
                         )
                         Text(
@@ -613,6 +641,8 @@ private fun MarketValuationTableCard(
                             style = MaterialTheme.typography.labelMedium,
                             color = if (eval.quarterKellyFraction > 0.0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.End,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.weight(0.85f)
                         )
                     }

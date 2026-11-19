@@ -29,6 +29,20 @@ data class TemporalCycleInfo(
     val exactDatesIso: List<String>
 )
 
+enum class CyclePreset(val label: String) {
+    WEEKEND_FRI_SUN("Sex–Dom"),
+    MIDWEEK_MON_THU("Seg–Qui"),
+    TODAY("Hoje"),
+    CUSTOM("Personalizado")
+}
+
+data class SelectableDay(
+    val isoDate: String,
+    val shortWeekday: String,
+    val dayMonth: String,
+    val isWeekend: Boolean
+)
+
 enum class StakeMode(val label: String) {
     FREEBET("Modo Freebet"),
     REAL_BANKROLL("Banca Real")

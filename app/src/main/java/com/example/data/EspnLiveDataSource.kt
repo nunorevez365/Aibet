@@ -17,6 +17,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
@@ -29,8 +30,7 @@ private const val TAG = "EspnLiveDataSource"
  * Real-time public soccer fixtures, season standings, and live odds client using ESPN's
  * official JSON endpoints (zero API key, zero Gemini quota consumption).
  *
- * Automatically calibrates against ESPN's HTTP `Date` server header so skewed emulator/device
- * clocks (e.g. future dates) still query the true current official football calendar.
+ * Strictly filters matches to the exact Portugal Continental (WET/WEST) dates selected by the user.
  */
 class EspnLiveDataSource {
 
@@ -54,9 +54,9 @@ class EspnLiveDataSource {
         val ppg: Double get() = if (gamesPlayed > 0) points.toDouble() / gamesPlayed else 1.35
     }
 
-    private data class HttpResponse(
-        val body: String,
-        val serverDateMillis: Long
+    private data class DatedMatch(
+        val kickoffMillis: Long,
+        val match: RawMatchData
     )
 
     private val midweekLeagues = listOf(
@@ -69,6 +69,8 @@ class EspnLiveDataSource {
         LeagueConfig("ger.1", "Bundesliga", 1.56, 1700.0),
         LeagueConfig("ita.1", "Serie A", 1.32, 1700.0),
         LeagueConfig("fra.1", "Ligue 1", 1.38, 1660.0),
+        LeagueConfig("eng.league_cup", "EFL Cup", 1.40, 1660.0),
+        LeagueConfig("esp.copa_del_rey", "Copa del Rey", 1.38, 1650.0),
         LeagueConfig("uefa.nations", "UEFA Nations League", 1.35, 1700.0)
     )
 
@@ -79,8 +81,9 @@ class EspnLiveDataSource {
         LeagueConfig("ger.1", "Bundesliga", 1.56, 1700.0),
         LeagueConfig("ita.1", "Serie A", 1.32, 1700.0),
         LeagueConfig("fra.1", "Ligue 1", 1.38, 1660.0),
-        LeagueConfig("uefa.champions", "UEFA Champions League", 1.48, 1780.0),
-        LeagueConfig("uefa.europa", "UEFA Europa League", 1.42, 1690.0)
+        LeagueConfig("ned.1", "Eredivisie", 1.55, 1620.0),
+        LeagueConfig("eng.fa", "FA Cup", 1.40, 1660.0),
+        LeagueConfig("uefa.nations", "UEFA Nations League", 1.35, 1700.0)
     )
 
     data class EspnFetchPayload(
@@ -91,111 +94,85 @@ class EspnLiveDataSource {
         val diagnosticError: String? = null
     )
 
-    suspend fun fetchConfirmedMatches(deviceCycleInfo: TemporalCycleInfo): EspnFetchPayload =
+    suspend fun fetchConfirmedMatches(selectedCycleInfo: TemporalCycleInfo): EspnFetchPayload =
         withContext(Dispatchers.IO) {
-            // 0. Calibrate real UTC time from ESPN server HTTP Date header (fixes skewed emulator clocks!)
-            val probeResult = runCatching {
-                httpGet("https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard")
-            }
-            val serverNow = probeResult.getOrNull()?.serverDateMillis ?: 0L
-            val deviceNow = System.currentTimeMillis()
-            val effectiveNow = if (serverNow > 1_600_000_000_000L && abs(serverNow - deviceNow) > 43_200_000L) {
-                Log.i(TAG, "Calibrated clock from ESPN HTTP Date header: server=$serverNow vs device=$deviceNow")
-                serverNow
-            } else {
-                deviceNow
-            }
-
-            val effectiveCycle = QuantEngine.detectCurrentPortugalCycle(effectiveNow)
-            val leagues = if (effectiveCycle.cycle == TemporalCycle.CYCLE_A_MIDWEEK) {
-                midweekLeagues
-            } else {
+            val allowedDatesWet = selectedCycleInfo.exactDatesIso.toSet()
+            val leagues = if (selectedCycleInfo.cycle == TemporalCycle.CYCLE_B_WEEKEND) {
                 weekendLeagues
+            } else {
+                midweekLeagues
             }
 
-            // 1. Try exact active cycle date range (using calibrated real clock)
-            val startCompact = effectiveCycle.startDateIso.replace("-", "")
-            val endCompact = effectiveCycle.endDateIso.replace("-", "")
-            val cycleRange = if (startCompact == endCompact) startCompact else "$startCompact-$endCompact"
+            // Query ESPN across [startDate - 1 day, endDate + 1 day] to avoid UTC/WET midnight boundary loss,
+            // then STRICTLY keep only fixtures whose Portugal WET/WEST date is inside allowedDatesWet!
+            val queryRange = buildBufferedCompactRange(
+                startIso = selectedCycleInfo.startDateIso,
+                endIso = selectedCycleInfo.endDateIso
+            )
 
-            var expanded = false
-            var collected = fetchAcrossLeagues(leagues, dateRangeParam = cycleRange, preMatchOnly = true)
+            val (datedMatches, sources) = fetchAcrossLeagues(
+                leagues = leagues,
+                dateRangeParam = queryRange,
+                allowedDatesWet = allowedDatesWet
+            )
 
-            // 2. If fewer than 4 upcoming official fixtures exist on exact cycle dates,
-            // query ESPN's default current matchday (no ?dates) + next 7 real days
-            if (collected.first.size < 4) {
-                expanded = true
-                val range7d = buildNextNDaysRange(baseMillis = effectiveNow, days = 7)
-                val next7 = fetchAcrossLeagues(leagues, dateRangeParam = range7d, preMatchOnly = true)
-                val mergedMatches = (collected.first + next7.first)
-                    .distinctBy { "${it.equipaCasa.lowercase()}_${it.equipaFora.lowercase()}" }
-                val mergedSources = (collected.second + next7.second).distinctBy { it.uri }
-                collected = mergedMatches to mergedSources
-            }
-
-            // 3. Query ESPN default active matchday (no ?dates) & next 14 days if still < 4
-            if (collected.first.size < 4) {
-                expanded = true
-                val defaultRound = fetchAcrossLeagues(leagues, dateRangeParam = null, preMatchOnly = true)
-                val range14d = buildNextNDaysRange(baseMillis = effectiveNow, days = 14)
-                val next14 = fetchAcrossLeagues(leagues, dateRangeParam = range14d, preMatchOnly = true)
-                val mergedMatches = (collected.first + defaultRound.first + next14.first)
-                    .distinctBy { "${it.equipaCasa.lowercase()}_${it.equipaFora.lowercase()}" }
-                val mergedSources = (collected.second + defaultRound.second + next14.second).distinctBy { it.uri }
-                collected = mergedMatches to mergedSources
-            }
-
-            // 4. Last ESPN resort (e.g., off-season week where all default scoreboard matches are "in"/"post"):
-            // accept current scoreboard fixtures so we still inspect real ESPN data if reachable
-            if (collected.first.size < 2) {
-                val anyCurrent = fetchAcrossLeagues(leagues, dateRangeParam = null, preMatchOnly = false)
-                val mergedMatches = (collected.first + anyCurrent.first)
-                    .distinctBy { "${it.equipaCasa.lowercase()}_${it.equipaFora.lowercase()}" }
-                val mergedSources = (collected.second + anyCurrent.second).distinctBy { it.uri }
-                collected = mergedMatches to mergedSources
-            }
-
-            val prioritized = collected.first
+            val sortedMatches = datedMatches
+                .sortedBy { it.kickoffMillis }
+                .map { it.match }
                 .distinctBy { "${it.equipaCasa.lowercase()}_${it.equipaFora.lowercase()}" }
-                .take(8)
+                .take(10)
 
-            val diag = if (prioritized.isEmpty()) {
-                probeResult.exceptionOrNull()?.message ?: "Sem eventos devolvidos pela ESPN."
+            val diag = if (sortedMatches.isEmpty()) {
+                val rangeLabel = if (selectedCycleInfo.startDateIso == selectedCycleInfo.endDateIso) {
+                    selectedCycleInfo.startDateIso
+                } else {
+                    "${selectedCycleInfo.startDateIso} a ${selectedCycleInfo.endDateIso}"
+                }
+                "Sem jogos oficiais agendados nas ligas principais entre $rangeLabel."
             } else {
                 null
             }
 
             EspnFetchPayload(
-                effectiveCycleInfo = effectiveCycle,
-                matches = prioritized,
-                sources = collected.second.distinctBy { it.uri },
-                expandedWindow = expanded,
+                effectiveCycleInfo = selectedCycleInfo,
+                matches = sortedMatches,
+                sources = sources.distinctBy { it.uri },
+                expandedWindow = false,
                 diagnosticError = diag
             )
         }
 
     private suspend fun fetchAcrossLeagues(
         leagues: List<LeagueConfig>,
-        dateRangeParam: String?,
-        preMatchOnly: Boolean
-    ): Pair<List<RawMatchData>, List<GroundingSource>> = coroutineScope {
+        dateRangeParam: String,
+        allowedDatesWet: Set<String>
+    ): Pair<List<DatedMatch>, List<GroundingSource>> = coroutineScope {
         val jobs = leagues.map { league ->
             async {
                 runCatching {
-                    val query = if (dateRangeParam != null) "?dates=$dateRangeParam" else ""
                     val scoreboardUrl =
-                        "https://site.api.espn.com/apis/site/v2/sports/soccer/${league.slug}/scoreboard$query"
-                    val response = httpGet(scoreboardUrl) ?: return@runCatching null
-                    val scoreboardJson = JSONObject(response.body)
+                        "https://site.api.espn.com/apis/site/v2/sports/soccer/${league.slug}/scoreboard?dates=$dateRangeParam"
+                    val body = httpGet(scoreboardUrl) ?: return@runCatching null
+                    val scoreboardJson = JSONObject(body)
                     val events = scoreboardJson.optJSONArray("events") ?: JSONArray()
                     if (events.length() == 0) return@runCatching null
+
+                    // Pre-check if any event actually falls inside the user's selected WET/WEST dates before fetching standings
+                    val hasMatchingDate = (0 until events.length()).any { idx ->
+                        val ev = events.optJSONObject(idx) ?: return@any false
+                        val comp = ev.optJSONArray("competitions")?.optJSONObject(0) ?: return@any false
+                        val utcStr = comp.optString("date", ev.optString("date", ""))
+                        val wetIso = extractPortugalIsoDate(utcStr)
+                        wetIso != null && wetIso in allowedDatesWet
+                    }
+                    if (!hasMatchingDate) return@runCatching null
 
                     val standingsMap = fetchLeagueStandings(league.slug)
                     val parsed = parseScoreboardEvents(
                         events = events,
                         league = league,
                         standings = standingsMap,
-                        preMatchOnly = preMatchOnly
+                        allowedDatesWet = allowedDatesWet
                     )
                     if (parsed.isEmpty()) {
                         null
@@ -220,8 +197,8 @@ class EspnLiveDataSource {
 
     private fun fetchLeagueStandings(slug: String): Map<String, TeamSeasonStats> {
         val url = "https://site.api.espn.com/apis/v2/sports/soccer/$slug/standings"
-        val response = runCatching { httpGet(url) }.getOrNull() ?: return emptyMap()
-        return runCatching { parseStandingsMap(JSONObject(response.body)) }.getOrDefault(emptyMap())
+        val body = runCatching { httpGet(url) }.getOrNull() ?: return emptyMap()
+        return runCatching { parseStandingsMap(JSONObject(body)) }.getOrDefault(emptyMap())
     }
 
     private fun parseStandingsMap(root: JSONObject): Map<String, TeamSeasonStats> {
@@ -274,9 +251,9 @@ class EspnLiveDataSource {
         events: JSONArray,
         league: LeagueConfig,
         standings: Map<String, TeamSeasonStats>,
-        preMatchOnly: Boolean
-    ): List<RawMatchData> {
-        val results = mutableListOf<RawMatchData>()
+        allowedDatesWet: Set<String>
+    ): List<DatedMatch> {
+        val results = mutableListOf<DatedMatch>()
         val leagueAvgGf = standings.values
             .filter { it.gamesPlayed >= 3 }
             .map { it.gfPerGame }
@@ -295,7 +272,14 @@ class EspnLiveDataSource {
                 ?.optString("state", "")
                 .orEmpty()
                 .lowercase(Locale.ROOT)
-            if (preMatchOnly && statusState != "pre") continue
+            // Skip already finished games; keep upcoming ("pre") fixtures
+            if (statusState == "post") continue
+
+            val utcStr = comp.optString("date", event.optString("date", ""))
+            val parsedDate = parseUtcDate(utcStr) ?: continue
+            val wetIsoDate = formatDateToPortugalIso(parsedDate)
+            // STRICT filter: discard any fixture not falling on the user's selected WET/WEST dates!
+            if (wetIsoDate !in allowedDatesWet) continue
 
             val competitors = comp.optJSONArray("competitors") ?: continue
             var homeObj: JSONObject? = null
@@ -338,7 +322,7 @@ class EspnLiveDataSource {
                 xgAway = xgAway
             )
 
-            val kickoffWet = formatUtcToPortugalWet(comp.optString("date", event.optString("date", "")))
+            val kickoffWet = formatDateToPortugalLabel(parsedDate)
             val formInfo = buildFormSummary(
                 homeName,
                 homeObj.optString("form", ""),
@@ -348,26 +332,29 @@ class EspnLiveDataSource {
             )
 
             results.add(
-                RawMatchData(
-                    id = "espn_${league.slug}_$eventId",
-                    dataHoraWet = kickoffWet,
-                    competicao = league.displayName,
-                    equipaCasa = homeName,
-                    equipaFora = awayName,
-                    xgCasaEstimado = xgHome,
-                    xgForaEstimado = xgAway,
-                    lesoesChave = formInfo,
-                    eloCasaEstimado = eloHome,
-                    eloForaEstimado = eloAway,
-                    odd1 = extractedOdds.odd1,
-                    oddX = extractedOdds.oddX,
-                    odd2 = extractedOdds.odd2,
-                    oddOver25 = extractedOdds.oddOver25,
-                    oddUnder35 = extractedOdds.oddUnder35,
-                    oddBtts = extractedOdds.oddBtts,
-                    fontesVerificadas = listOfNotNull(
-                        "ESPN (${league.displayName})",
-                        extractedOdds.fromProviderName?.let { "Odds: $it" }
+                DatedMatch(
+                    kickoffMillis = parsedDate.time,
+                    match = RawMatchData(
+                        id = "espn_${league.slug}_$eventId",
+                        dataHoraWet = kickoffWet,
+                        competicao = league.displayName,
+                        equipaCasa = homeName,
+                        equipaFora = awayName,
+                        xgCasaEstimado = xgHome,
+                        xgForaEstimado = xgAway,
+                        lesoesChave = formInfo,
+                        eloCasaEstimado = eloHome,
+                        eloForaEstimado = eloAway,
+                        odd1 = extractedOdds.odd1,
+                        oddX = extractedOdds.oddX,
+                        odd2 = extractedOdds.odd2,
+                        oddOver25 = extractedOdds.oddOver25,
+                        oddUnder35 = extractedOdds.oddUnder35,
+                        oddBtts = extractedOdds.oddBtts,
+                        fontesVerificadas = listOfNotNull(
+                            "ESPN (${league.displayName})",
+                            extractedOdds.fromProviderName?.let { "Odds: $it" }
+                        )
                     )
                 )
             )
@@ -557,9 +544,26 @@ class EspnLiveDataSource {
         return parts.joinToString(" • ")
     }
 
-    private fun formatUtcToPortugalWet(isoUtc: String): String {
-        if (isoUtc.isBlank()) return "Horário por confirmar"
+    private fun buildBufferedCompactRange(startIso: String, endIso: String): String {
         val lisbonTz = TimeZone.getTimeZone("Europe/Lisbon")
+        val isoFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = lisbonTz }
+        val compactFmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = lisbonTz }
+        val startDate = runCatching { isoFmt.parse(startIso) }.getOrNull() ?: Date()
+        val endDate = runCatching { isoFmt.parse(endIso) }.getOrNull() ?: startDate
+
+        val startCal = Calendar.getInstance(lisbonTz).apply {
+            time = startDate
+            add(Calendar.DAY_OF_MONTH, -1)
+        }
+        val endCal = Calendar.getInstance(lisbonTz).apply {
+            time = endDate
+            add(Calendar.DAY_OF_MONTH, 1)
+        }
+        return "${compactFmt.format(startCal.time)}-${compactFmt.format(endCal.time)}"
+    }
+
+    private fun parseUtcDate(isoUtc: String): Date? {
+        if (isoUtc.isBlank()) return null
         val utcTz = TimeZone.getTimeZone("UTC")
         val parsers = listOf(
             "yyyy-MM-dd'T'HH:mm'Z'",
@@ -570,26 +574,31 @@ class EspnLiveDataSource {
             val parsed = runCatching {
                 SimpleDateFormat(pattern, Locale.US).apply { timeZone = utcTz }.parse(isoUtc)
             }.getOrNull()
-            if (parsed != null) {
-                val out = SimpleDateFormat("dd/MM HH:mm", Locale("pt", "PT")).apply {
-                    timeZone = lisbonTz
-                }
-                val suffix = if (lisbonTz.inDaylightTime(parsed)) "WEST" else "WET"
-                return "${out.format(parsed)} $suffix"
-            }
+            if (parsed != null) return parsed
         }
-        return isoUtc.take(16)
+        return null
     }
 
-    private fun buildNextNDaysRange(baseMillis: Long, days: Int): String {
+    private fun extractPortugalIsoDate(isoUtc: String): String? {
+        val date = parseUtcDate(isoUtc) ?: return null
+        return formatDateToPortugalIso(date)
+    }
+
+    private fun formatDateToPortugalIso(date: Date): String {
         val lisbonTz = TimeZone.getTimeZone("Europe/Lisbon")
-        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = lisbonTz }
-        val start = Calendar.getInstance(lisbonTz).apply { timeInMillis = baseMillis }
-        val end = (start.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, days) }
-        return "${fmt.format(start.time)}-${fmt.format(end.time)}"
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = lisbonTz }.format(date)
     }
 
-    private fun httpGet(urlString: String): HttpResponse? {
+    private fun formatDateToPortugalLabel(date: Date): String {
+        val lisbonTz = TimeZone.getTimeZone("Europe/Lisbon")
+        val out = SimpleDateFormat("dd/MM HH:mm", Locale("pt", "PT")).apply {
+            timeZone = lisbonTz
+        }
+        val suffix = if (lisbonTz.inDaylightTime(date)) "WEST" else "WET"
+        return "${out.format(date)} $suffix"
+    }
+
+    private fun httpGet(urlString: String): String? {
         val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 9_000
@@ -600,10 +609,8 @@ class EspnLiveDataSource {
         }
         return try {
             val code = conn.responseCode
-            val serverDate = conn.date
             if (code in 200..299) {
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                HttpResponse(body = body, serverDateMillis = serverDate)
+                conn.inputStream.bufferedReader().use { it.readText() }
             } else {
                 Log.w(TAG, "HTTP $code for $urlString")
                 null

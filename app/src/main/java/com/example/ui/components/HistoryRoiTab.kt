@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.BetSlipEntity
@@ -145,19 +146,26 @@ private fun RoiPerformanceCard(roiSummary: RoiSummary) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Lucro Líquido Acumulado",
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = QuantFormatters.signedEuro(roiSummary.totalNetProfit),
-                        style = MaterialTheme.typography.displaySmall,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontFamily = MonoFontFamily,
-                        color = profitColor
+                        fontWeight = FontWeight.Bold,
+                        color = profitColor,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+                Spacer(modifier = Modifier.width(8.dp))
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = if (roiSummary.roiPercent >= 0.0) {
@@ -173,14 +181,18 @@ private fun RoiPerformanceCard(roiSummary: RoiSummary) {
                         Text(
                             text = "ROI Real",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
                             text = QuantFormatters.signedPercentDirect(roiSummary.roiPercent),
                             style = MaterialTheme.typography.titleMedium,
                             fontFamily = MonoFontFamily,
                             fontWeight = FontWeight.Bold,
-                            color = profitColor
+                            color = profitColor,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -285,19 +297,25 @@ private fun RoiStatChip(
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = value,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
-                color = accent
+                color = accent,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -398,14 +416,20 @@ private fun SavedSlipHistoryCard(
                 Text(
                     text = "Odd @ ${QuantFormatters.odd(slip.combinedOdd)} • Stake ${QuantFormatters.euro(slip.stake)} (${if (slip.isFreebet) "Freebet" else "Real"})",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = QuantFormatters.signedEuro(slip.netProfit),
                     style = MaterialTheme.typography.titleSmall,
                     fontFamily = MonoFontFamily,
                     fontWeight = FontWeight.Bold,
-                    color = statusColor
+                    color = statusColor,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
@@ -468,7 +492,7 @@ private fun OutcomeActionPill(
         border = BorderStroke(1.dp, if (selected) accent else MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -476,13 +500,16 @@ private fun OutcomeActionPill(
                 imageVector = icon,
                 contentDescription = null,
                 tint = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(15.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium,
-                color = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

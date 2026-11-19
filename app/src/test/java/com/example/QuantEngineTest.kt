@@ -134,4 +134,34 @@ class QuantEngineTest {
         assertEquals(4.00, espn.americanToDecimal(300.0), 0.01)
         assertEquals(2.00, espn.americanToDecimal(100.0), 0.01)
     }
+
+    @Test
+    fun cycleDayPresets_returnCorrectFriSunAndMonThuDatesAndStrictCycleInfo() {
+        val lisbonTz = java.util.TimeZone.getTimeZone("Europe/Lisbon")
+        val thuCal = java.util.Calendar.getInstance(lisbonTz).apply {
+            set(2026, java.util.Calendar.NOVEMBER, 19, 11, 0, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val thuMillis = thuCal.timeInMillis
+
+        val selectable = QuantEngine.buildSelectableDays(nowMillis = thuMillis, dayCount = 10)
+        assertEquals(10, selectable.size)
+        assertEquals("2026-11-19", selectable.first().isoDate)
+        assertEquals("Qui", selectable.first().shortWeekday)
+
+        val weekendDates = QuantEngine.getDatesForPreset(com.example.quant.CyclePreset.WEEKEND_FRI_SUN, thuMillis)
+        assertEquals(listOf("2026-11-20", "2026-11-21", "2026-11-22"), weekendDates)
+
+        val midweekDates = QuantEngine.getDatesForPreset(com.example.quant.CyclePreset.MIDWEEK_MON_THU, thuMillis)
+        assertEquals(listOf("2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26"), midweekDates)
+
+        val todayDates = QuantEngine.getDatesForPreset(com.example.quant.CyclePreset.TODAY, thuMillis)
+        assertEquals(listOf("2026-11-19"), todayDates)
+
+        val weekendCycle = QuantEngine.buildCycleInfoForDates(weekendDates, thuMillis)
+        assertEquals(com.example.quant.TemporalCycle.CYCLE_B_WEEKEND, weekendCycle.cycle)
+        assertEquals("2026-11-20", weekendCycle.startDateIso)
+        assertEquals("2026-11-22", weekendCycle.endDateIso)
+        assertEquals(weekendDates, weekendCycle.exactDatesIso)
+    }
 }

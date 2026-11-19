@@ -155,7 +155,9 @@ fun MainScreen(viewModel: BetViewModel) {
                                 label = {
                                     Text(
                                         text = stringResource(tab.titleRes),
-                                        style = MaterialTheme.typography.labelLarge
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 },
                                 colors = NavigationBarItemDefaults.colors(
@@ -197,7 +199,9 @@ fun MainScreen(viewModel: BetViewModel) {
                                 label = {
                                     Text(
                                         text = stringResource(tab.titleRes),
-                                        style = MaterialTheme.typography.labelLarge
+                                        style = MaterialTheme.typography.labelLarge,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 },
                                 colors = NavigationRailItemDefaults.colors(
@@ -229,6 +233,8 @@ fun MainScreen(viewModel: BetViewModel) {
                             when (tabIndex) {
                                 0 -> BoletinsTab(
                                     uiState = uiState,
+                                    onSelectCyclePreset = viewModel::selectCyclePreset,
+                                    onToggleDate = viewModel::toggleDateSelection,
                                     onAnalyzeClick = viewModel::analyzeAndGenerateSlips,
                                     onStakeModeChange = viewModel::setStakeMode,
                                     onBudgetInputChange = viewModel::onBudgetInputChanged,

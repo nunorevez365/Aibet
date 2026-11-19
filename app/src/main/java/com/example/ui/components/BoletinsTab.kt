@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Public
@@ -76,11 +78,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.quant.AnalysisBundle
-import com.example.quant.BetSlipType
+import com.example.quant.CyclePreset
 import com.example.quant.GeneratedSlip
 import com.example.quant.GroundingSource
 import com.example.quant.MonteCarloReport
 import com.example.quant.QuantEngine
+import com.example.quant.SelectableDay
 import com.example.quant.StakeMode
 import com.example.quant.TemporalCycleInfo
 import com.example.ui.AnalysisUiState
@@ -91,6 +94,8 @@ import com.example.ui.theme.MonoFontFamily
 @Composable
 fun BoletinsTab(
     uiState: BetUiState,
+    onSelectCyclePreset: (CyclePreset) -> Unit,
+    onToggleDate: (String) -> Unit,
     onAnalyzeClick: () -> Unit,
     onStakeModeChange: (StakeMode) -> Unit,
     onBudgetInputChange: (String) -> Unit,
@@ -107,6 +112,16 @@ fun BoletinsTab(
     ) {
         item(key = "hero_header") {
             QuantHeroBanner(cycleInfo = uiState.cycleInfo)
+        }
+
+        item(key = "cycle_day_selector") {
+            CycleDaySelectorCard(
+                selectableDays = uiState.selectableDays,
+                activePreset = uiState.activePreset,
+                selectedDatesIso = uiState.selectedDatesIso,
+                onSelectPreset = onSelectCyclePreset,
+                onToggleDate = onToggleDate
+            )
         }
 
         item(key = "stake_panel") {
@@ -167,12 +182,11 @@ fun BoletinsTab(
                 }
 
                 item(key = "slips_header") {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = "Boletins Quantitativos (3)",
                                 style = MaterialTheme.typography.titleLarge,
@@ -187,6 +201,7 @@ fun BoletinsTab(
                         OutlinedButton(
                             onClick = onSaveAllSlips,
                             modifier = Modifier
+                                .fillMaxWidth()
                                 .heightIn(min = 48.dp)
                                 .testTag("save_all_slips_button"),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
@@ -196,10 +211,13 @@ fun BoletinsTab(
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = stringResource(R.string.label_save_all_slips),
-                                style = MaterialTheme.typography.labelLarge
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -330,7 +348,9 @@ private fun QuantHeroBanner(cycleInfo: TemporalCycleInfo) {
                             Text(
                                 text = "${cycleInfo.currentTimeWet} ${cycleInfo.timezoneLabel}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -342,8 +362,13 @@ private fun QuantHeroBanner(cycleInfo: TemporalCycleInfo) {
                     color = MaterialTheme.colorScheme.onBackground
                 )
 
+                val dateRangeLabel = if (cycleInfo.startDateIso == cycleInfo.endDateIso) {
+                    "${cycleInfo.cycle.daySpanLabel} • ${cycleInfo.startDateIso}"
+                } else {
+                    "${cycleInfo.cycle.daySpanLabel} • ${cycleInfo.startDateIso} → ${cycleInfo.endDateIso}"
+                }
                 Text(
-                    text = "${cycleInfo.cycle.daySpanLabel} • ${cycleInfo.startDateIso} → ${cycleInfo.endDateIso}",
+                    text = dateRangeLabel,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary
                 )
@@ -356,6 +381,196 @@ private fun QuantHeroBanner(cycleInfo: TemporalCycleInfo) {
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun CycleDaySelectorCard(
+    selectableDays: List<SelectableDay>,
+    activePreset: CyclePreset,
+    selectedDatesIso: Set<String>,
+    onSelectPreset: (CyclePreset) -> Unit,
+    onToggleDate: (String) -> Unit
+) {
+    val quickPresets = listOf(
+        CyclePreset.WEEKEND_FRI_SUN,
+        CyclePreset.MIDWEEK_MON_THU,
+        CyclePreset.TODAY
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CalendarMonth,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Dias & Ciclo dos Jogos",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    val count = selectedDatesIso.size
+                    Text(
+                        text = if (count == 1) "1 dia" else "$count dias",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // Quick Cycle Presets: Sex–Dom | Seg–Qui | Hoje
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                quickPresets.forEach { preset ->
+                    val isSelected = activePreset == preset
+                    Surface(
+                        onClick = { onSelectPreset(preset) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("cycle_preset_${preset.name.lowercase()}"),
+                        shape = MaterialTheme.shapes.small,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.secondary
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            }
+                        )
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = preset.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Individual multi-select day strip
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(selectableDays, key = { it.isoDate }) { day ->
+                    val isSelected = day.isoDate in selectedDatesIso
+                    Surface(
+                        onClick = { onToggleDate(day.isoDate) },
+                        modifier = Modifier
+                            .widthIn(min = 66.dp)
+                            .heightIn(min = 56.dp)
+                            .testTag("day_chip_${day.isoDate}"),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.78f)
+                        },
+                        border = BorderStroke(
+                            width = if (isSelected) 1.5.dp else 1.dp,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            }
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = day.shortWeekday,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else if (day.isWeekend) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Text(
+                                text = day.dayMonth,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontFamily = MonoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = "Só analisa jogos oficiais exatamente nos dias selecionados (hora de Portugal).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -416,7 +631,7 @@ private fun BankrollControlCard(
                         )
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
@@ -429,71 +644,96 @@ private fun BankrollControlCard(
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = mode.label,
                                 style = MaterialTheme.typography.labelLarge,
                                 color = if (selected) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             }
 
+            // Full-width amount input (never crushed on narrow screens)
+            OutlinedTextField(
+                value = budgetInput,
+                onValueChange = onBudgetInputChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("budget_amount_input"),
+                singleLine = true,
+                label = {
+                    Text(
+                        text = if (stakeMode == StakeMode.FREEBET) {
+                            stringResource(R.string.label_budget_freebet)
+                        } else {
+                            stringResource(R.string.label_budget_real)
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                textStyle = MaterialTheme.typography.titleMedium.copy(fontFamily = MonoFontFamily),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                )
+            )
+
+            // Evenly spaced full-width preset buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedTextField(
-                    value = budgetInput,
-                    onValueChange = onBudgetInputChange,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("budget_amount_input"),
-                    singleLine = true,
-                    label = {
-                        Text(
-                            text = if (stakeMode == StakeMode.FREEBET) {
-                                stringResource(R.string.label_budget_freebet)
+                presets.forEach { amount ->
+                    val isSelected = kotlin.math.abs(budgetAmount - amount) < 0.01
+                    Surface(
+                        onClick = { onBudgetPresetClick(amount) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("preset_${amount.toInt()}"),
+                        shape = MaterialTheme.shapes.small,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
                             } else {
-                                stringResource(R.string.label_budget_real)
+                                MaterialTheme.colorScheme.outline
                             }
                         )
-                    },
-                    textStyle = MaterialTheme.typography.titleMedium.copy(fontFamily = MonoFontFamily),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                    )
-                )
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(presets) { amount ->
-                        val isSelected = kotlin.math.abs(budgetAmount - amount) < 0.01
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { onBudgetPresetClick(amount) },
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("preset_${amount.toInt()}"),
-                            label = {
-                                Text(
-                                    text = "${amount.toInt()}€",
-                                    fontFamily = MonoFontFamily
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.primary
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${amount.toInt()}€",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontFamily = MonoFontFamily,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                maxLines = 1,
+                                softWrap = false
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -508,11 +748,11 @@ private fun BankrollControlCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
                             text = "Gestão Automática de Stake",
@@ -576,19 +816,25 @@ private fun AllocationPill(
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = value,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
-                color = accent
+                color = accent,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -765,7 +1011,7 @@ private fun IdleMethodologyCard() {
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PipelineBadgeLine("1", "Fontes reais via Google Search: Flashscore, ZeroZero, FBref, Transfermarkt, Betclic.pt")
+                PipelineBadgeLine("1", "Calendário oficial em tempo real nos dias escolhidos + classificações, golos e odds Betclic")
                 PipelineBadgeLine("2", "Motor local Kotlin: Matriz Poisson 12×12 + Dixon-Coles (ρ = -0.13) + Elo dinâmico")
                 PipelineBadgeLine("3", "Valuation: Edge real, +EV (Real / Freebet SNR), Kelly 1/4 e Monte Carlo 100.000×")
             }
@@ -989,7 +1235,9 @@ private fun KpiMetricTile(
                 fontFamily = MonoFontFamily,
                 fontWeight = FontWeight.Bold,
                 color = accent,
-                maxLines = 1
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1076,7 +1324,14 @@ private fun GeneratedSlipCard(
                             .weight(1f)
                             .heightIn(min = 48.dp)
                             .testTag("slip3_variant_base"),
-                        label = { Text(stringResource(R.string.label_variant_base)) },
+                        label = {
+                            Text(
+                                text = stringResource(R.string.label_variant_base),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = accentContainer,
                             selectedLabelColor = accentColor
@@ -1089,7 +1344,14 @@ private fun GeneratedSlipCard(
                             .weight(1f)
                             .heightIn(min = 48.dp)
                             .testTag("slip3_variant_full"),
-                        label = { Text(stringResource(R.string.label_variant_full)) },
+                        label = {
+                            Text(
+                                text = stringResource(R.string.label_variant_full),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = accentContainer,
                             selectedLabelColor = accentColor
@@ -1146,15 +1408,21 @@ private fun GeneratedSlipCard(
                                     Text(
                                         text = leg.market.displayName,
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = accentColor
+                                        color = accentColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "P=${QuantFormatters.percent(leg.trueProbability)}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
+
+                            Spacer(modifier = Modifier.width(8.dp))
 
                             Column(
                                 horizontalAlignment = Alignment.End,
@@ -1165,12 +1433,16 @@ private fun GeneratedSlipCard(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontFamily = MonoFontFamily,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                                 Text(
                                     text = "Edge ${QuantFormatters.signedPercentFraction(leg.edge)}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (leg.edge >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                    color = if (leg.edge >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -1203,14 +1475,14 @@ private fun GeneratedSlipCard(
                 )
             }
 
-            Row(
+            // Responsive footer: probability summary stacked above full-width Save button
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
                     text = "Prob. Real: ${QuantFormatters.percent(slip.combinedTrueProb)}  •  Edge: ${QuantFormatters.signedPercentDirect(slip.edgePercent)}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
@@ -1218,6 +1490,7 @@ private fun GeneratedSlipCard(
                     onClick = onSave,
                     enabled = !isSaved,
                     modifier = Modifier
+                        .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .testTag("save_slip_${slip.type.code.lowercase()}"),
                     border = BorderStroke(1.dp, if (isSaved) MaterialTheme.colorScheme.outline else accentColor)
@@ -1228,10 +1501,13 @@ private fun GeneratedSlipCard(
                         tint = if (isSaved) MaterialTheme.colorScheme.primary else accentColor,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isSaved) stringResource(R.string.label_saved) else stringResource(R.string.label_save_slip),
-                        color = if (isSaved) MaterialTheme.colorScheme.primary else accentColor
+                        color = if (isSaved) MaterialTheme.colorScheme.primary else accentColor,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

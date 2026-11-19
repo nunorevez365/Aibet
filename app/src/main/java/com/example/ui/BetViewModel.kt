@@ -9,10 +9,12 @@ import com.example.data.BetSlipEntity
 import com.example.data.GeminiRepository
 import com.example.quant.AnalysisBundle
 import com.example.quant.BetStatus
+import com.example.quant.CyclePreset
 import com.example.quant.GeneratedSlip
 import com.example.quant.GroundedFetchResult
 import com.example.quant.QuantEngine
 import com.example.quant.RoiSummary
+import com.example.quant.SelectableDay
 import com.example.quant.StakeMode
 import com.example.quant.TemporalCycleInfo
 import kotlinx.coroutines.CancellationException
@@ -47,7 +49,12 @@ enum class HistoryFilter(val label: String) {
 }
 
 data class BetUiState(
-    val cycleInfo: TemporalCycleInfo = QuantEngine.detectCurrentPortugalCycle(),
+    val selectableDays: List<SelectableDay> = QuantEngine.buildSelectableDays(dayCount = 10),
+    val activePreset: CyclePreset = CyclePreset.WEEKEND_FRI_SUN,
+    val selectedDatesIso: Set<String> = QuantEngine.getDatesForPreset(CyclePreset.WEEKEND_FRI_SUN).toSet(),
+    val cycleInfo: TemporalCycleInfo = QuantEngine.buildCycleInfoForDates(
+        QuantEngine.getDatesForPreset(CyclePreset.WEEKEND_FRI_SUN)
+    ),
     val stakeMode: StakeMode = StakeMode.FREEBET,
     val budgetInput: String = "5.00",
     val budgetAmount: Double = 5.0,
@@ -87,8 +94,37 @@ class BetViewModel(
             initialValue = BetHistoryRepository.computeRoiSummary(emptyList())
         )
 
-    fun refreshCycleClock() {
-        _uiState.update { it.copy(cycleInfo = QuantEngine.detectCurrentPortugalCycle()) }
+    fun selectCyclePreset(preset: CyclePreset) {
+        val now = System.currentTimeMillis()
+        val days = QuantEngine.buildSelectableDays(nowMillis = now, dayCount = 10)
+        val dates = QuantEngine.getDatesForPreset(preset, nowMillis = now).toSet()
+        val updatedCycle = QuantEngine.buildCycleInfoForDates(dates, nowMillis = now)
+        _uiState.update {
+            it.copy(
+                selectableDays = days,
+                activePreset = preset,
+                selectedDatesIso = dates,
+                cycleInfo = updatedCycle
+            )
+        }
+    }
+
+    fun toggleDateSelection(isoDate: String) {
+        val now = System.currentTimeMillis()
+        val current = _uiState.value.selectedDatesIso
+        val next = if (isoDate in current) {
+            if (current.size <= 1) current else current - isoDate
+        } else {
+            current + isoDate
+        }
+        val updatedCycle = QuantEngine.buildCycleInfoForDates(next, nowMillis = now)
+        _uiState.update {
+            it.copy(
+                activePreset = CyclePreset.CUSTOM,
+                selectedDatesIso = next,
+                cycleInfo = updatedCycle
+            )
+        }
     }
 
     fun setStakeMode(mode: StakeMode) {
@@ -168,15 +204,16 @@ class BetViewModel(
 
         viewModelScope.launch {
             try {
-                // Step 1: Detect live Portugal Continental WET/WEST cycle
-                val cycleInfo = QuantEngine.detectCurrentPortugalCycle()
+                // Step 1: Lock selected Portugal Continental WET/WEST cycle & dates
+                val selectedDates = _uiState.value.selectedDatesIso
+                val cycleInfo = QuantEngine.buildCycleInfoForDates(selectedDates)
                 _uiState.update {
                     it.copy(
                         cycleInfo = cycleInfo,
                         savedSlipKeys = emptySet(),
                         analysisState = AnalysisUiState.Analyzing(
                             stepIndex = 1,
-                            stepLabel = "Passo 1/4 • A validar ${cycleInfo.cycle.code} (${cycleInfo.startDateIso} a ${cycleInfo.endDateIso} WET)…"
+                            stepLabel = "Passo 1/4 • ${cycleInfo.cycle.code}: ${cycleInfo.startDateIso} a ${cycleInfo.endDateIso} (${cycleInfo.timezoneLabel})…"
                         )
                     )
                 }
